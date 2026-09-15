@@ -150,8 +150,9 @@ Vous devez disposer au moins de l'un des produits suivants pour bénéficier de 
   </a>
 
 > [!CAUTION]
-> **Information importante**
+> **Attention**
 >
+> Cette version comporte un problème connu important.
 > Dans le cas où vous auriez une Freebox Devialet, il faut que cette dernière puisse être rattachée à un abonnement chez Free pour avoir la capacité de télécharger des applications dans le Free Store, endroit où se trouve l'application en production. Si vous êtes en possession d'une Freebox Devialet sans avoir d'abonnement, merci de me contacter pour un test qui pourrait vous permettre de faire tourner l'application différemment.
 
 ### Installation
