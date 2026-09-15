@@ -160,8 +160,12 @@ Une fois votre mail envoyé à application.redefin@proton.me pour candidater en 
 
 Vous pourrez alors vous rendre dans le Free Store sur votre Freebox Player afin de télécharger ReDeFin.
 
-[!CAUTION]
-> Dans le cas où vous auriez une Freebox Devialet, il faut que cette dernière puisse être rattachée à un abonnement chez Free pour avoir la capacité de télécharger des applications dans le Free Store, endroit où se trouve l'application en production. Si vous êtes en possession d'une Freebox Devialet sans avoir d'abonnement, merci de me contacter pour un test qui pourrait vous permettre de faire tourner l'application différemment.
+> [!CAUTION]
+> **Utilisateurs Freebox Devialet**
+>
+> Pour télécharger ReDeFin depuis le Free Store, votre Freebox Devialet doit être rattachée à un abonnement Free permettant l'accès au Free Store.
+>
+> Si vous possédez une Freebox Devialet sans abonnement Free associé, merci de me contacter. Une méthode de test alternative pourrait vous permettre d'exécuter ReDeFin autrement.
 
 <p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
 
