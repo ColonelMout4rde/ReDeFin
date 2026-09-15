@@ -149,8 +149,24 @@ Vous devez disposer au moins de l'un des produits suivants pour bénéficier de 
     <img src="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c" alt="Logo" width="576" height="320">
   </a>
 
-[!CAUTION]
-> Dans le cas où vous auriez une Freebox Devialet, il faut que cette dernière puisse être rattachée à un abonnement chez > Free pour avoir la capacité de télécharger des applications dans le Free Store, endroit où se trouve l'application en > production. Si vous êtes en possession d'une Freebox Devialet sans avoir d'abonnement, merci de me contacter pour un > > test qui pourrait vous permettre de faire tourner l'application différemment.
+> [!CAUTION]
+> **Anomalie connue**
+> **ANOMALIE EN COURS**
+>
+> Une anomalie peut actuellement affecter certaines fonctionnalités de ReDeFin.
+> Une correction est en cours.
+> Une incompatibilité liée aux évolutions de l'API de **Jellyfin Server 12** affecte actuellement l'accès aux serveurs Jellyfin depuis le client **ReDeFin**.
+>
+> Certaines requêtes API encore utilisées par la version actuelle de ReDeFin sont devenues obsolètes avec Jellyfin Server 12.
+>
+> Pour le moment, le problème concerne principalement les versions **Release Candidate de Jellyfin Server 12**. Cependant, la version stable de Jellyfin Server 12 devrait être publiée prochainement.
+>
+> **Si ReDeFin v4 n'est pas encore disponible au moment de sa sortie, il est recommandé de ne pas mettre à jour votre serveur Jellyfin vers la version 12 si vous souhaitez continuer à utiliser ReDeFin.**
+>
+> Le travail de migration vers les nouvelles API Jellyfin a déjà été réalisé afin que ReDeFin n'utilise plus les requêtes devenues obsolètes.
+>
+> La correction sera intégrée à **ReDeFin v4**, dont la sortie est actuellement prévue autour de la période de la rentrée scolaire.
+> Merci de votre compréhension.
 
 ### Installation
 
