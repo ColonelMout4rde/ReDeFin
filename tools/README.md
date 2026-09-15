@@ -74,10 +74,19 @@ Trois solutions :
 
 ### Limites
 
-- Protocole déduit d'un dépôt Free de 2014 : non confirmé sur un firmware
-  Player actuel, et **non testé sur un vrai Player** lors de l'écriture de
-  ce script (uniquement contre un faux Player simulé dans
-  `tests/py/test_fbx_run.py`).
+- Protocole déduit d'un dépôt Free de 2014, **validé en septembre 2026 sur
+  un Freebox Player Révolution** en mode développeur (firmware courant) :
+  découverte mDNS, appel `debug_qml_app`, chargement des fichiers en HTTP
+  et relais des sorties fonctionnent. Le test automatisé reste un faux
+  Player (`tests/py/test_fbx_run.py`).
+- Sorties normales à ignorer dans la console du Player : `GET 404 .../qmldir`
+  et `.../qml/pages/qmldir` (le moteur QML sonde chaque répertoire
+  importé), et « Application instance does not declare a handleUrl()
+  function » (aucun `urlHandler` dans le manifeste).
+- Sous WSL2 en mode miroir, le pare-feu Hyper-V bloque par défaut les
+  connexions entrantes vers WSL : créer une règle pour le port HTTP local
+  (PowerShell administrateur) :
+  `New-NetFirewallHyperVRule -Name "ReDeFin-fbx-run" -DisplayName "ReDeFin fbx-run (WSL)" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 8234 -Action Allow`
 - Ne concerne que le Freebox Player (Révolution) en mode développeur ; sans
   rapport avec le Freebox Pop.
 - La découverte mDNS dépend du module tiers `zeroconf` (optionnel).
