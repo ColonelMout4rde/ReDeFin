@@ -138,16 +138,20 @@ Pour candidater en tant que bêta-testeur, il faut vous munir de votre n° d'abo
 Vous devez disposer au moins de l'un des produits suivants pour bénéficier de cette application :
 
 * Freebox Révolution
- <div align="left">
-  <a href="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264">
-    <img src="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264" alt="Logo" width="576" height="320">
-  </a>
 
-  * Freebox Delta-Devialet
-  <div align="left">
-  <a href="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c">
-    <img src="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c" alt="Logo" width="576" height="320">
+<div align="left">
+  <a href="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264">
+    <img src="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264" alt="Freebox Révolution" width="576" height="320">
   </a>
+</div>
+
+* Freebox Delta-Devialet
+
+<div align="left">
+  <a href="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c">
+    <img src="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c" alt="Freebox Delta Devialet" width="576" height="320">
+  </a>
+</div>
 
 
 ### Installation
