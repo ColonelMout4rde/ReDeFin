@@ -2549,20 +2549,16 @@ FocusScope {
                 readonly property string tag: avatarTagVerified ? rawTag : ""
                 readonly property bool remembered: !!(u && u.Remember === true)
                 property bool  _selecting: false
-                property bool  _pressActive: false
-                property bool  _armed: false
-                property bool  _keyHeld: false
-                property real  _armedAtMs: 0
-                property real  _downAtMs: 0
+                // Machine à états pure de l'appui OK (verrou de touche compris).
+                // Une instance par delegate, jamais partagée.
+                property var   _press: PressGesture.createMachine()
                 property real  _holdProgress: 0
                 property int   _preArmMs: 1000
                 property int   _commitMs: 1000
                 property int   _fallbackLongMs: 2000
                 Timer { id: preArm; interval: tile._preArmMs; repeat: false
                     onTriggered: {
-                        if (!tile._pressActive) return;
-                        tile._armed = true;
-                        tile._armedAtMs = Date.now();
+                        if (!tile._press.armedNow(Date.now())) return;
                         commitTimer.start();
                         progressTick.start();
                         tile._holdProgress = 0;
@@ -2572,7 +2568,7 @@ FocusScope {
                 Timer { id: commitTimer; interval: tile._commitMs; repeat: false
                     onTriggered: {
                         var removeId = tile.uid
-                        var shouldRemove = tile._pressActive && tile._armed && !!removeId
+                        var shouldRemove = tile._press.pressActive && tile._press.armed && !!removeId
                         if (shouldRemove) page._swallowOkUntilRelease()
                         // logoutAndRemoveById() peut reconstruire le modèle et détruire
                         // ce delegate. Toujours nettoyer le press AVANT l'appel.
@@ -2582,30 +2578,31 @@ FocusScope {
                 }
                 Timer { id: progressTick; interval: 100; repeat: true
                     onTriggered: {
-                        if (!tile._pressActive || !tile._armed) { stop(); return; }
-                        tile._holdProgress = Math.max(0, Math.min(1, (Date.now() - tile._armedAtMs) / Math.max(1, tile._commitMs)));
+                        if (!tile._press.pressActive || !tile._press.armed) { stop(); return; }
+                        tile._holdProgress = Math.max(0, Math.min(1, (Date.now() - tile._press.armedAtMs) / Math.max(1, tile._commitMs)));
                     }
                 }
                 function _isOkKey(k){ return page._isOkKey ? page._isOkKey(k) : (k===Qt.Key_Return || k===Qt.Key_Enter || k===Qt.Key_Select || k===Qt.Key_Okay); }
+                // Conditions d'acceptation d'un nouvel appui. Si elles ne sont
+                // pas réunies, la machine ne pose pas le verrou de touche : la
+                // tuile reste réceptive à l'appui suivant.
+                function _canBeginPress() {
+                    if (page._postLogoutLatch || page._okSwallowUntilRelease) return false;
+                    if (!tile.uid) return false;
+                    return true;
+                }
                 function _beginPress() {
-                    if (page._postLogoutLatch || page._okSwallowUntilRelease) { return; }
-                    if (!uid) { return; }
-                    tile._downAtMs = Date.now();
-                    tile._pressActive = true;
-                    tile._armed = false;
+                    if (tile._press.keyDown(Date.now(), tile._canBeginPress()) !== "begin") return;
                     preArm.restart();
                 }
                 function _endPress() {
-                    var now = Date.now();
                     var selectedUid = tile.uid;
                     // La décision appartient à PressGesture : tout relâchement qui
                     // n'atteint pas le seuil de suppression sélectionne le profil,
                     // y compris un appui long abandonné avant la confirmation.
-                    var action = PressGesture.decideRelease({
-                        active: tile._pressActive,
-                        dur: now - tile._downAtMs,
-                        armed: tile._armed,
-                        armedDur: tile._armed ? (now - tile._armedAtMs) : 0,
+                    // keyUp() lève toujours le verrou de touche, y compris sur un
+                    // relâchement fantôme (action "none").
+                    var action = tile._press.keyUp(Date.now(), {
                         commitMs: tile._commitMs,
                         fallbackLongMs: tile._fallbackLongMs
                     });
@@ -2622,8 +2619,7 @@ FocusScope {
                     }
                 }
                 function _resetPress() {
-                    tile._pressActive = false;
-                    tile._armed = false;
+                    tile._press.reset();
                     preArm.stop();
                     commitTimer.stop();
                     progressTick.stop();
@@ -2872,10 +2868,7 @@ FocusScope {
                     if (tile._isOkKey(event.key)) {
                         event.accepted = true;
                         if (event.isAutoRepeat) { return; }
-                        if (!tile._keyHeld) {
-                            tile._keyHeld = true;
-                            tile._beginPress();
-                        }
+                        tile._beginPress();
                     } else if (event.key===Qt.Key_Left) {
                         if (userCarousel.currentIndex > 0)
                             userCarousel.currentIndex = userCarousel.currentIndex - 1;
@@ -2890,8 +2883,8 @@ FocusScope {
                     if (tile._isOkKey(event.key)) {
                         event.accepted = true;
                         if (event.isAutoRepeat) { return; }
-                        if (!tile._pressActive) { return; } // release fantôme
-                        tile._keyHeld = false;
+                        // _endPress() gère lui-même le relâchement fantôme : il
+                        // doit être appelé dans tous les cas pour lever le verrou.
                         tile._endPress();
                     }
                 }

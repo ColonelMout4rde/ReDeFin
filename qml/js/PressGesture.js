@@ -64,3 +64,101 @@ function decideRelease(opts) {
     // avant la confirmation.
     return "select";
 }
+
+/**
+ * Petite machine à états d'appui/relâchement, sans dépendance Qt.
+ *
+ * Elle porte le verrou de touche (keyHeld) et l'état d'appui (pressActive),
+ * afin qu'aucun chemin d'erreur ne puisse laisser le verrou posé : un appui
+ * refusé par l'appelant ne pose jamais le verrou, et un relâchement le lève
+ * toujours, même s'il n'y avait aucun appui en cours.
+ *
+ * Chaque appelant crée SA machine (createMachine()) : rien n'est partagé
+ * entre les instances, malgré le .pragma library.
+ *
+ * Cycle nominal :
+ *   keyDown(now, canStart) -> "begin"  (démarrer le timer d'amorçage)
+ *   armedNow(now)          -> true     (le timer d'amorçage a tiré)
+ *   keyUp(now, cfg)        -> "select" | "remove" | "none"
+ */
+function createMachine() {
+    return {
+        // Vrai entre un keyDown accepté et le keyUp correspondant.
+        keyHeld: false,
+        // Vrai tant qu'un appui est réellement en cours de mesure.
+        pressActive: false,
+        // Vrai une fois la phase « appui long » amorcée.
+        armed: false,
+        downAtMs: 0,
+        armedAtMs: 0,
+
+        /**
+         * Touche OK enfoncée.
+         * @param {number} now horodatage en ms.
+         * @param {bool} canStart faux si l'appelant refuse l'appui (latch
+         *        post-logout, bouclier OK, identifiant manquant...).
+         * @returns {string} "begin" si un appui démarre, "ignore" sinon.
+         */
+        keyDown: function (now, canStart) {
+            // Répétition automatique ou évènement en double : un seul appui.
+            if (this.keyHeld) return "ignore";
+            // Appui refusé : on ne pose surtout PAS le verrou, sans quoi la
+            // tuile ignorerait définitivement la touche OK.
+            if (canStart === false) return "ignore";
+
+            this.keyHeld = true;
+            this.pressActive = true;
+            this.armed = false;
+            this.downAtMs = _num(now, 0);
+            this.armedAtMs = 0;
+            return "begin";
+        },
+
+        /**
+         * Le timer d'amorçage a tiré : bascule en phase « appui long ».
+         * @returns {bool} vrai si l'amorçage s'applique (appui toujours en cours).
+         */
+        armedNow: function (now) {
+            if (!this.pressActive) return false;
+            this.armed = true;
+            this.armedAtMs = _num(now, 0);
+            return true;
+        },
+
+        /**
+         * Touche OK relâchée. Lève TOUJOURS le verrou de touche, puis rend
+         * l'action à exécuter et remet l'appui à zéro.
+         * @param {number} now horodatage en ms.
+         * @param {object} cfg { commitMs, fallbackLongMs }.
+         * @returns {string} "select" | "remove" | "none"
+         */
+        keyUp: function (now, cfg) {
+            var wasActive = this.pressActive;
+            var t = _num(now, 0);
+            var c = cfg || {};
+
+            this.keyHeld = false;
+
+            var action = decideRelease({
+                active: wasActive,
+                dur: t - this.downAtMs,
+                armed: this.armed,
+                armedDur: this.armed ? (t - this.armedAtMs) : 0,
+                commitMs: c.commitMs,
+                fallbackLongMs: c.fallbackLongMs
+            });
+
+            this.reset();
+            return action;
+        },
+
+        /** Abandonne l'appui en cours. Ne touche pas au verrou de touche :
+         *  celui-ci n'est levé que par le relâchement réel de la touche. */
+        reset: function () {
+            this.pressActive = false;
+            this.armed = false;
+            this.downAtMs = 0;
+            this.armedAtMs = 0;
+        }
+    };
+}

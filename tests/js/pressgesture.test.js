@@ -83,3 +83,136 @@ test('decideRelease : entrées invalides retombent sur des valeurs sûres', () =
         'remove'
     );
 });
+
+/* ---------------------------------------------------------------------- */
+/* Machine à états d'appui (verrou de touche)                             */
+/* ---------------------------------------------------------------------- */
+
+test('createMachine : instances indépendantes, état initial propre', () => {
+    const a = PressGesture.createMachine();
+    const b = PressGesture.createMachine();
+
+    assert.equal(a.keyHeld, false);
+    assert.equal(a.pressActive, false);
+    assert.equal(a.armed, false);
+
+    a.keyDown(0, true);
+    assert.equal(a.keyHeld, true);
+    // Malgré le .pragma library, rien n'est partagé entre deux machines.
+    assert.equal(b.keyHeld, false);
+    assert.equal(b.pressActive, false);
+});
+
+test('createMachine : appui nominal => sélection', () => {
+    const m = PressGesture.createMachine();
+
+    assert.equal(m.keyDown(1000, true), 'begin');
+    assert.equal(m.pressActive, true);
+    assert.equal(m.keyUp(1300, CFG), 'select');
+    assert.equal(m.keyHeld, false);
+    assert.equal(m.pressActive, false);
+});
+
+test('createMachine : un appui refusé ne verrouille pas la touche', () => {
+    const m = PressGesture.createMachine();
+
+    // Appui refusé (latch post-logout, bouclier OK, uid manquant...).
+    assert.equal(m.keyDown(1000, false), 'ignore');
+    assert.equal(m.keyHeld, false, 'le verrou ne doit pas être posé');
+    assert.equal(m.pressActive, false);
+
+    // Relâchement correspondant : aucune action, et rien ne reste bloqué.
+    assert.equal(m.keyUp(1100, CFG), 'none');
+    assert.equal(m.keyHeld, false);
+
+    // L'appui suivant, lui accepté, doit sélectionner normalement : c'était
+    // le bug (la tuile ignorait définitivement OK après un appui refusé).
+    assert.equal(m.keyDown(2000, true), 'begin');
+    assert.equal(m.keyUp(2300, CFG), 'select');
+});
+
+test('createMachine : appui refusé sans relâchement, puis appui accepté', () => {
+    const m = PressGesture.createMachine();
+
+    // Cas le plus vicieux : le relâchement du premier appui n'arrive jamais
+    // (la tuile a perdu le focus, l'évènement a été avalé par le bouclier).
+    assert.equal(m.keyDown(1000, false), 'ignore');
+    assert.equal(m.keyDown(2000, true), 'begin');
+    assert.equal(m.keyUp(2300, CFG), 'select');
+});
+
+test('createMachine : relâchement fantôme sans appui ne bloque rien', () => {
+    const m = PressGesture.createMachine();
+
+    assert.equal(m.keyUp(500, CFG), 'none');
+    assert.equal(m.keyHeld, false);
+    assert.equal(m.pressActive, false);
+
+    assert.equal(m.keyDown(1000, true), 'begin');
+    assert.equal(m.keyUp(1400, CFG), 'select');
+});
+
+test('createMachine : autorepeat / keyDown en double ignorés', () => {
+    const m = PressGesture.createMachine();
+
+    assert.equal(m.keyDown(1000, true), 'begin');
+    assert.equal(m.keyDown(1100, true), 'ignore');
+    assert.equal(m.keyDown(1200, true), 'ignore');
+    // La durée reste mesurée depuis le PREMIER appui.
+    assert.equal(m.downAtMs, 1000);
+    assert.equal(m.keyUp(1500, CFG), 'select');
+});
+
+test('createMachine : armedNow() et appui long confirmé', () => {
+    const m = PressGesture.createMachine();
+
+    m.keyDown(1000, true);
+    assert.equal(m.armedNow(2000), true);
+    assert.equal(m.armed, true);
+    assert.equal(m.armedAtMs, 2000);
+
+    // Relâchement avant la fin de l'anneau : sélection.
+    assert.equal(m.keyUp(2500, CFG), 'select');
+
+    // Anneau mené à son terme : suppression.
+    const m2 = PressGesture.createMachine();
+    m2.keyDown(0, true);
+    m2.armedNow(1000);
+    assert.equal(m2.keyUp(2000, CFG), 'remove');
+});
+
+test('createMachine : armedNow() sans appui en cours est sans effet', () => {
+    const m = PressGesture.createMachine();
+
+    // Timer d'amorçage arrivé en retard, après un reset (suppression déjà
+    // exécutée, perte de focus...) : il ne doit pas réarmer la machine.
+    assert.equal(m.armedNow(1000), false);
+    assert.equal(m.armed, false);
+
+    m.keyDown(1000, true);
+    m.reset();
+    assert.equal(m.armedNow(2000), false);
+    assert.equal(m.armed, false);
+});
+
+test('createMachine : reset() abandonne l’appui mais garde le verrou', () => {
+    const m = PressGesture.createMachine();
+
+    m.keyDown(1000, true);
+    m.armedNow(2000);
+    // Cas du commitTimer : la suppression part alors que la touche est encore
+    // enfoncée. L'appui est abandonné, mais le verrou reste posé jusqu'au
+    // relâchement réel, pour ne pas redémarrer un appui sur l'autorepeat.
+    m.reset();
+    assert.equal(m.pressActive, false);
+    assert.equal(m.armed, false);
+    assert.equal(m.keyHeld, true);
+
+    // Le relâchement ne déclenche plus rien et lève le verrou.
+    assert.equal(m.keyUp(3500, CFG), 'none');
+    assert.equal(m.keyHeld, false);
+
+    // Et l'appui suivant repart normalement.
+    assert.equal(m.keyDown(4000, true), 'begin');
+    assert.equal(m.keyUp(4200, CFG), 'select');
+});
