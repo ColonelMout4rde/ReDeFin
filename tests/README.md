@@ -106,9 +106,11 @@ Depuis la racine du dépôt :
 ```
 
 Enchaîne : lint syntaxique de tous les `.qml`, vérification syntaxique de
-tous les `.js` de `qml/js`, tests unitaires Node (`tests/js`) et tests
-Qt Quick Test headless (`tests/qml`). Voir `./check.sh -h` pour les options
-(`--no-lint`, `--no-tests`).
+tous les `.js` de `qml/js`, tests unitaires Node (`tests/js`), tests
+Qt Quick Test headless (`tests/qml`) et tests Python de l'outillage
+(`tests/py`, bibliothèque standard : ils couvrent `tools/fbx-run.py`, voir
+`tools/README.md`). Voir `./check.sh -h` pour les options (`--no-lint`,
+`--no-tests`).
 
 ## Écrire un test Node (bibliothèques JS de qml/js)
 

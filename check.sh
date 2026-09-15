@@ -113,7 +113,7 @@ OVERALL_STATUS=0
 # 1. Lint syntaxique QML (qmllint)
 # =============================================================================
 if [ "${RUN_LINT}" -eq 1 ]; then
-    echo "-- [1/4] Lint syntaxique QML (qmllint) --"
+    echo "-- [1/5] Lint syntaxique QML (qmllint) --"
 
     QMLLINT_BIN=""
     if [ -n "${REDEFIN_QT_VENV:-}" ] && [ -x "${REDEFIN_QT_VENV}/bin/pyside6-qmllint" ]; then
@@ -226,14 +226,14 @@ if [ "${RUN_LINT}" -eq 1 ]; then
     echo "Avertissements [import] restants : ${LINT_IMPORT_WARNINGS} (informatif)."
     echo
 else
-    echo "-- [1/4] Lint syntaxique QML : ignoré (--no-lint) --"
+    echo "-- [1/5] Lint syntaxique QML : ignoré (--no-lint) --"
     echo
 fi
 
 # =============================================================================
 # 2. Vérification syntaxique des bibliothèques JS QML (node --check)
 # =============================================================================
-echo "-- [2/4] Vérification syntaxique JS (node --check) --"
+echo "-- [2/5] Vérification syntaxique JS (node --check) --"
 
 if ! command -v node >/dev/null 2>&1; then
     echo "Erreur : node est introuvable dans le PATH." >&2
@@ -283,7 +283,7 @@ echo
 # 3. Tests unitaires Node (tests/js)
 # =============================================================================
 if [ "${RUN_TESTS}" -eq 1 ]; then
-    echo "-- [3/4] Tests unitaires Node (tests/js) --"
+    echo "-- [3/5] Tests unitaires Node (tests/js) --"
 
     mapfile -t NODE_TEST_FILES < <(find "${ROOT}/tests/js" -name "*.test.js" | LC_ALL=C sort)
 
@@ -306,7 +306,7 @@ if [ "${RUN_TESTS}" -eq 1 ]; then
     fi
     echo
 else
-    echo "-- [3/4] Tests unitaires Node : ignorés (--no-tests) --"
+    echo "-- [3/5] Tests unitaires Node : ignorés (--no-tests) --"
     echo
 fi
 
@@ -314,7 +314,7 @@ fi
 # 4. Tests Qt Quick Test headless (tests/qml)
 # =============================================================================
 if [ "${RUN_TESTS}" -eq 1 ]; then
-    echo "-- [4/4] Tests Qt Quick Test (tests/qml) --"
+    echo "-- [4/5] Tests Qt Quick Test (tests/qml) --"
 
     QML_TEST_FILES_COUNT="$(find "${ROOT}/tests/qml" -name "tst_*.qml" | wc -l | tr -d '[:space:]')"
 
@@ -350,7 +350,36 @@ if [ "${RUN_TESTS}" -eq 1 ]; then
     fi
     echo
 else
-    echo "-- [4/4] Tests Qt Quick Test : ignorés (--no-tests) --"
+    echo "-- [4/5] Tests Qt Quick Test : ignorés (--no-tests) --"
+    echo
+fi
+
+# =============================================================================
+# 5. Tests Python de l'outillage (tests/py : tools/fbx-run.py)
+# =============================================================================
+if [ "${RUN_TESTS}" -eq 1 ]; then
+    echo "-- [5/5] Tests Python de l'outillage (tests/py) --"
+
+    PY_TEST_FILES_COUNT="$(find "${ROOT}/tests/py" -name "test_*.py" 2>/dev/null | wc -l | tr -d '[:space:]')"
+
+    if [ "${PY_TEST_FILES_COUNT}" -eq 0 ]; then
+        echo "Avis : aucun fichier tests/py/test_*.py trouvé, étape ignorée."
+        record_step "Tests Python (tests/py)" 0
+    elif ! command -v python3 >/dev/null 2>&1; then
+        echo "Avis : python3 introuvable, étape ignorée."
+        record_step "Tests Python (tests/py)" 0
+    else
+        # Bibliothèque standard uniquement : l'interpréteur système suffit.
+        if python3 -m unittest discover -s "${ROOT}/tests/py"; then
+            record_step "Tests Python (tests/py)" 0
+        else
+            record_step "Tests Python (tests/py)" 1
+            OVERALL_STATUS=1
+        fi
+    fi
+    echo
+else
+    echo "-- [5/5] Tests Python de l'outillage : ignorés (--no-tests) --"
     echo
 fi
 
