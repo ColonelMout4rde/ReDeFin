@@ -97,6 +97,65 @@ else
     echo "Avis : python3 introuvable, validation JSON de manifest.json ignorée." >&2
 fi
 
+# --- Validation des règles métier de manifest.json (si python3 disponible) ---
+# Mêmes règles que le packager FreeStore d'origine (fileformat/manifest.cc
+# du plugin QtCreator Freebox, 2014) : identifier, entryPoints, uiFlavor.
+if [ "${HAVE_PYTHON3}" -eq 1 ]; then
+    if ! python3 - "${ROOT}/manifest.json" <<'PYEOF'
+import json
+import re
+import sys
+
+IDENTIFIER_RE = re.compile(r"\w+(\.\w+)+")
+FILE_RE = re.compile(r"[/\w.+~-]+")
+UI_FLAVOR_RE = re.compile(r"(multi|classic)", re.IGNORECASE)
+
+
+def fail(msg):
+    print("Erreur : " + msg, file=sys.stderr)
+    sys.exit(1)
+
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    manifest = json.load(f)
+
+if not isinstance(manifest, dict):
+    fail("le manifeste doit être un objet JSON.")
+
+identifier = manifest.get("identifier")
+if not isinstance(identifier, str) or not IDENTIFIER_RE.fullmatch(identifier):
+    fail(
+        "le champ 'identifier' est requis et doit être de la forme "
+        "'mot.mot' (ex : com.exemple.app) ; valeur actuelle : {!r}".format(identifier)
+    )
+
+entry_points = manifest.get("entryPoints")
+if not isinstance(entry_points, dict) or not entry_points:
+    fail("le champ 'entryPoints' doit être un objet non vide.")
+
+for name, ep in entry_points.items():
+    if not isinstance(ep, dict):
+        fail("entryPoints.{}. doit être un objet.".format(name))
+
+    file_value = ep.get("file")
+    if not isinstance(file_value, str) or not FILE_RE.fullmatch(file_value):
+        fail("entryPoints.{}.file est requis et doit être un chemin valide.".format(name))
+
+    if "uiFlavor" in ep:
+        ui_flavor = ep["uiFlavor"]
+        if not isinstance(ui_flavor, str) or not UI_FLAVOR_RE.fullmatch(ui_flavor):
+            fail("entryPoints.{}.uiFlavor doit valoir 'multi' ou 'classic'.".format(name))
+
+    if "default" in ep and not isinstance(ep["default"], bool):
+        fail("entryPoints.{}.default doit être un booléen.".format(name))
+PYEOF
+    then
+        exit 2
+    fi
+else
+    echo "Avis : python3 introuvable, validation des règles de manifest.json ignorée." >&2
+fi
+
 # --- Lecture de la version depuis manifest.json ---
 if [ "${HAVE_PYTHON3}" -eq 1 ]; then
     VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${ROOT}/manifest.json")"
@@ -190,6 +249,44 @@ NB_FILES="$(wc -l < "${LIST_FILE}" | tr -d '[:space:]')"
 if [ "${NB_FILES}" -eq 0 ]; then
     echo "Erreur : la liste des fichiers à empaqueter est vide." >&2
     exit 2
+fi
+
+# --- Vérification que les fichiers de entryPoints seront bien empaquetés ---
+# Même contrôle que le packager FreeStore d'origine (freestorepackager.cc) :
+# un fichier de entryPoints absent ou mal orthographié bloque le paquet.
+if [ "${HAVE_PYTHON3}" -eq 1 ]; then
+    if ! python3 - "${ROOT}/manifest.json" "${LIST_FILE}" <<'PYEOF'
+import json
+import sys
+
+manifest_path, list_path = sys.argv[1], sys.argv[2]
+
+with open(manifest_path, encoding="utf-8") as f:
+    manifest = json.load(f)
+
+with open(list_path, encoding="utf-8") as f:
+    packaged = {line.strip() for line in f if line.strip()}
+
+entry_points = manifest.get("entryPoints", {})
+missing = []
+for name, ep in entry_points.items():
+    file_value = ep.get("file") if isinstance(ep, dict) else None
+    if file_value and file_value not in packaged:
+        missing.append("{} ({})".format(file_value, name))
+
+if missing:
+    print(
+        "Erreur : fichier(s) de entryPoints manquant(s) ou mal orthographié(s) "
+        "dans la liste des fichiers empaquetés : " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PYEOF
+    then
+        exit 2
+    fi
+else
+    echo "Avis : python3 introuvable, vérification des fichiers entryPoints ignorée." >&2
 fi
 
 # --- Construction reproductible de l'archive ---
