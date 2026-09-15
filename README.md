@@ -149,7 +149,10 @@ Vous devez disposer au moins de l'un des produits suivants pour bénéficier de 
     <img src="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c" alt="Logo" width="576" height="320">
   </a>
 
-IMPORTANT : Dans le cas où vous auriez une Freebox Devialet, il faut que cette dernière puisse être rattachée à un abonnement chez Free pour avoir la capacité de télécharger des applications dans le Free Store, endroit où se trouve l'application en production.
+> [!IMPORTANT]
+> 📢 **Information**
+>
+> Dans le cas où vous auriez une Freebox Devialet, il faut que cette dernière puisse être rattachée à un abonnement chez Free pour avoir la capacité de télécharger des applications dans le Free Store, endroit où se trouve l'application en production. Si vous êtes en possession d'une Freebox Devialet sans avoir d'abonnement, merci de me contacter pour un test qui pourrait vous permettre de faire tourner l'application différemment.
 
 ### Installation
 
