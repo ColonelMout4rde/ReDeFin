@@ -156,7 +156,7 @@ Une fois votre mail envoyé à application.redefin@proton.me pour candidater en 
 
 Vous pourrez alors vous rendre dans le Free Store sur votre Freebox Player afin de télécharger ReDeFin.
 
- [!WARNING]
+> [!WARNING]
 > ⚠️ **Attention**
 >
 > Ton message ici.
