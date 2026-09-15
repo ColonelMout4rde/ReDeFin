@@ -184,7 +184,29 @@ Exemples fournis :
 - `tst_smoke.qml` : composant réel sans dépendance firmware
   (`qml/components/CircleDotsLoader.qml`) ;
 - `tst_fbxmodules.qml` : résolution des modules `fbx.*` (libfbxqml + stub
-  `fbx.system`).
+  `fbx.system`) ;
+- `tst_profiletile.qml` : câblage QML de la tuile de profil, en instanciant
+  la vraie `qml/pages/LoginPage.qml` (voir ci-dessous).
+
+### Instancier une page réelle sans réseau
+
+`tst_profiletile.qml` montre le motif à réutiliser pour tester une page
+complète du projet :
+
+- `serverUrl` reste vide, donc `_doLoadData()` sort immédiatement et aucune
+  requête `XMLHttpRequest` n'est émise ;
+- `settingsRef` reste nul, donc `_syncStoreSecurityPolicy()` renvoie `false`
+  et `hydrateFromStore()` n'est pas appelée au chargement ;
+- le modèle est injecté après coup (`localUsers` puis `_recomputeModel()`),
+  après une attente courte laissant passer `Component.onCompleted` et le
+  debounce de `loadData()` ;
+- les gestes sont joués avec `keyPress` / `wait` / `keyRelease` sur l'élément
+  qui a le focus, et observés via les propriétés publiques de la page
+  (`overlayOpen`, `_removeArmedUid`, `usersModel`), les `id` internes d'un
+  composant n'étant pas accessibles de l'extérieur.
+
+Ce test dure une dizaine de secondes : il rejoue de vrais appuis longs
+(2,4 s), ce qui est le seul moyen de couvrir les `Timer` de la tuile.
 
 Pour lancer uniquement les tests QML :
 
