@@ -1092,6 +1092,22 @@ FocusScope {
         requestNavigation("serverpage.qml")
     }
 
+    /* ==== Confirmation de suppression d'un profil (appui long) ==== */
+    // Même motif que « Oublier cet appareil » : un premier geste arme, un
+    // second confirme. Aucun profil n'est supprimé sur un seul appui.
+    property string _removeArmedUid: ""
+    Timer {
+        id: removeArmTimer
+        interval: 4000
+        repeat: false
+        onTriggered: page._removeArmedUid = ""
+    }
+    function _setRemoveArmedUid(uid){
+        page._removeArmedUid = uid || ""
+        if (page._removeArmedUid) removeArmTimer.restart()
+        else removeArmTimer.stop()
+    }
+
     function requestForgetThisDevice(){
         if (!_forgetDeviceArmed) {
             _forgetDeviceArmed = true
@@ -2569,11 +2585,10 @@ FocusScope {
                     onTriggered: {
                         var removeId = tile.uid
                         var shouldRemove = tile._press.pressActive && tile._press.armed && !!removeId
-                        if (shouldRemove) page._swallowOkUntilRelease()
-                        // logoutAndRemoveById() peut reconstruire le modèle et détruire
-                        // ce delegate. Toujours nettoyer le press AVANT l'appel.
+                        // _requestRemove() peut reconstruire le modèle et détruire ce
+                        // delegate. Toujours nettoyer le press AVANT l'appel.
                         tile._resetPress()
-                        if (shouldRemove) page.logoutAndRemoveById(removeId)
+                        if (shouldRemove) tile._requestRemove(removeId)
                     }
                 }
                 Timer { id: progressTick; interval: 100; repeat: true
@@ -2581,6 +2596,11 @@ FocusScope {
                         if (!tile._press.pressActive || !tile._press.armed) { stop(); return; }
                         tile._holdProgress = Math.max(0, Math.min(1, (Date.now() - tile._press.armedAtMs) / Math.max(1, tile._commitMs)));
                     }
+                }
+                // Changer de tuile annule la confirmation en attente.
+                onActiveFocusChanged: {
+                    if (!tile.activeFocus && page._removeArmedUid === tile.uid)
+                        page._setRemoveArmedUid("");
                 }
                 function _isOkKey(k){ return page._isOkKey ? page._isOkKey(k) : (k===Qt.Key_Return || k===Qt.Key_Enter || k===Qt.Key_Select || k===Qt.Key_Okay); }
                 // Conditions d'acceptation d'un nouvel appui. Si elles ne sont
@@ -2594,6 +2614,15 @@ FocusScope {
                 function _beginPress() {
                     if (tile._press.keyDown(Date.now(), tile._canBeginPress()) !== "begin") return;
                     preArm.restart();
+                }
+                // Un appui long ne supprime jamais du premier coup : il arme la
+                // tuile, un second appui long confirme (cf. PressGesture.nextRemoveState).
+                function _requestRemove(removeId) {
+                    var st = PressGesture.nextRemoveState(page._removeArmedUid, removeId, "remove");
+                    page._setRemoveArmedUid(st.armedUid);
+                    if (!st.execute) return;
+                    page._swallowOkUntilRelease();
+                    page.logoutAndRemoveById(removeId);
                 }
                 function _endPress() {
                     var selectedUid = tile.uid;
@@ -2611,10 +2640,11 @@ FocusScope {
                     // delegate : toujours nettoyer le press AVANT d'agir.
                     tile._resetPress();
                     if (action === "remove") {
-                        if (!selectedUid) return;
-                        page._swallowOkUntilRelease();
-                        page.logoutAndRemoveById(selectedUid);
+                        tile._requestRemove(selectedUid);
                     } else if (action === "select") {
+                        // Une sélection désarme toujours la confirmation en cours.
+                        page._setRemoveArmedUid(
+                            PressGesture.nextRemoveState(page._removeArmedUid, selectedUid, "select").armedUid);
                         tile.selectThis();
                     }
                 }
@@ -2884,6 +2914,18 @@ FocusScope {
                         width: avatarBox.width
                         horizontalAlignment: Text.AlignHCenter
                         elide: Text.ElideRight
+                    }
+                    Text {
+                        id: removeConfirmLabel
+                        textFormat: Text.PlainText
+                        text: "Appuyez encore sur OK\npour supprimer"
+                        color: page.uiDanger
+                        font.pixelSize: 12
+                        width: avatarBox.width
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.NoWrap
+                        visible: tile.uid !== "" && page._removeArmedUid === tile.uid
+                        height: visible ? implicitHeight : 0
                     }
                 }
                 Keys.onPressed: {

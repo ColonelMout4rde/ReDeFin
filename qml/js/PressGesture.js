@@ -162,3 +162,42 @@ function createMachine() {
         }
     };
 }
+
+/**
+ * Confirmation d'une suppression par appui long, sur le modèle du bouton
+ * « Oublier cet appareil » (un premier OK arme, un second exécute).
+ *
+ * Fonction pure : l'appelant lui passe l'identifiant actuellement armé,
+ * l'identifiant visé et l'action rendue par decideRelease(), et reçoit le
+ * nouvel identifiant armé ainsi que l'ordre d'exécuter ou non.
+ *
+ * Règles :
+ *   - "remove" sur un identifiant déjà armé  => exécution, désarmement ;
+ *   - "remove" sur un autre identifiant      => armement, rien d'exécuté ;
+ *   - "select" (tap ou appui long abandonné) => désarmement, rien d'exécuté :
+ *     la sélection normale reprend la main, elle appartient à l'appelant ;
+ *   - toute autre action ("none")            => état inchangé.
+ *
+ * @param {string} currentArmedUid identifiant actuellement armé ("" si aucun).
+ * @param {string} uid identifiant visé par le geste.
+ * @param {string} action "remove" | "select" | "none".
+ * @returns {object} { armedUid: string, execute: bool }
+ */
+function nextRemoveState(currentArmedUid, uid, action) {
+    var armed = (currentArmedUid === undefined || currentArmedUid === null)
+        ? "" : String(currentArmedUid);
+    var target = (uid === undefined || uid === null) ? "" : String(uid);
+
+    if (action === "remove") {
+        // Sans identifiant, il n'y a rien à armer ni à supprimer.
+        if (!target) return { armedUid: "", execute: false };
+        if (armed && armed === target) return { armedUid: "", execute: true };
+        return { armedUid: target, execute: false };
+    }
+
+    // Une sélection désarme toujours : un appui court pendant l'armement
+    // doit rendre la tuile à son usage normal, sans rien supprimer.
+    if (action === "select") return { armedUid: "", execute: false };
+
+    return { armedUid: armed, execute: false };
+}

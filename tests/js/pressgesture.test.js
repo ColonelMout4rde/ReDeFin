@@ -216,3 +216,50 @@ test('createMachine : reset() abandonne l’appui mais garde le verrou', () => {
     assert.equal(m.keyDown(4000, true), 'begin');
     assert.equal(m.keyUp(4200, CFG), 'select');
 });
+
+/* ---------------------------------------------------------------------- */
+/* Confirmation de suppression (« Appuyez encore sur OK »)                */
+/* ---------------------------------------------------------------------- */
+
+// Les objets rendus viennent du contexte `vm` du module : leur prototype
+// n'est pas celui de Node, donc deepStrictEqual() échouerait. On compare
+// donc champ à champ.
+function assertRemoveState(actual, armedUid, execute, message) {
+    assert.equal(actual.armedUid, armedUid, message);
+    assert.equal(actual.execute, execute, message);
+}
+
+test('nextRemoveState : le premier appui long arme, le second supprime', () => {
+    const first = PressGesture.nextRemoveState('', 'u1', 'remove');
+    assertRemoveState(first, 'u1', false);
+
+    const second = PressGesture.nextRemoveState(first.armedUid, 'u1', 'remove');
+    assertRemoveState(second, '', true);
+
+    // Après exécution, plus rien n'est armé : un nouvel appui long réarme.
+    assertRemoveState(PressGesture.nextRemoveState(second.armedUid, 'u1', 'remove'), 'u1', false);
+});
+
+test('nextRemoveState : un appui long sur une autre tuile réarme sans supprimer', () => {
+    assertRemoveState(PressGesture.nextRemoveState('u1', 'u2', 'remove'), 'u2', false);
+});
+
+test('nextRemoveState : un tap pendant l’armement désarme sans supprimer', () => {
+    // La sélection elle-même reste à la charge de l'appelant.
+    assertRemoveState(PressGesture.nextRemoveState('u1', 'u1', 'select'), '', false);
+    assertRemoveState(PressGesture.nextRemoveState('u1', 'u2', 'select'), '', false);
+    assertRemoveState(PressGesture.nextRemoveState('', 'u1', 'select'), '', false);
+});
+
+test('nextRemoveState : "none" et identifiants manquants', () => {
+    // Relâchement fantôme : rien ne bouge, l'armement en cours est conservé.
+    assertRemoveState(PressGesture.nextRemoveState('u1', 'u1', 'none'), 'u1', false);
+    assertRemoveState(PressGesture.nextRemoveState('', 'u1', 'none'), '', false);
+
+    // Sans identifiant visé, aucune suppression possible.
+    assertRemoveState(PressGesture.nextRemoveState('u1', '', 'remove'), '', false);
+    assertRemoveState(PressGesture.nextRemoveState(undefined, undefined, 'remove'), '', false);
+
+    // Un armement vide ne peut jamais déclencher d'exécution.
+    assertRemoveState(PressGesture.nextRemoveState(null, 'u1', 'remove'), 'u1', false);
+});
