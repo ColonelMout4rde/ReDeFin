@@ -2633,6 +2633,9 @@ FocusScope {
 
                     var tok = page.tokenByUserId[uid] || "";
 
+                    // Nouvelle tentative : le message d'erreur précédent n'a plus lieu d'être.
+                    page.errorText = "";
+
                     // Même serveur, autre profil : les résultats du profil précédent
                     // ne doivent jamais être réutilisés.
                     page._clearApiCaches();
@@ -2661,12 +2664,31 @@ FocusScope {
                                     page.openLoginForUser(name || "")
                                 }
                             },
-                            function(){
+                            function(err){
                                 tile._selecting = false
                                 page.requestHomeLoading(false)
-                                try { if (Store.clearUserToken) Store.clearUserToken(page.serverUrl, uid) } catch(e1) {}
-                                try { delete page.tokenByUserId[uid] } catch(e2) { page.tokenByUserId[uid] = "" }
-                                page.openLoginForUser(name || "")
+
+                                // Une panne de transport ne prouve rien sur la
+                                // validité du token : on ne purge la session
+                                // mémorisée que si le serveur l'a explicitement
+                                // rejetée.
+                                var drop = true
+                                try { drop = Store.shouldDropStoredToken(err) } catch(eDrop) { drop = true }
+
+                                if (drop) {
+                                    try { if (Store.clearUserToken) Store.clearUserToken(page.serverUrl, uid) } catch(e1) {}
+                                    try { delete page.tokenByUserId[uid] } catch(e2) { page.tokenByUserId[uid] = "" }
+                                    page.openLoginForUser(name || "")
+                                    return
+                                }
+
+                                // Token conservé : on se contente d'informer.
+                                var code = ""
+                                try { code = SafeLog.safeErrorCode(err, "network_error") } catch(e4) { code = "network_error" }
+                                // "cancelled" = requête abandonnée par l'appli
+                                // elle-même (autre profil cliqué) : silencieux.
+                                if (code !== "cancelled")
+                                    page.errorText = "Serveur injoignable, réessayez."
                             }
                         )
                     } catch(e3) {

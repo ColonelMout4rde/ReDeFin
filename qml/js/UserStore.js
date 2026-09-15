@@ -1367,6 +1367,38 @@ function clearTokens() {
     _writeUsersArr(list);
 }
 
+// Faut-il purger le token mémorisé d'un profil après un échec de
+// validation ? OUI uniquement quand le serveur a répondu que ce token
+// n'est plus valable. Une panne de transport (réseau coupé, délai dépassé,
+// requête annulée, réponse illisible, erreur 5xx du serveur) ne prouve RIEN
+// sur la validité du token : effacer dans ce cas forcerait l'utilisateur à
+// ressaisir son mot de passe alors que sa session est intacte.
+//
+// Fonction pure : elle accepte un code déjà normalisé, une chaîne brute, un
+// nombre ou un objet ({ code }, { status }...), et le normalise via
+// SafeLog.safeErrorCode().
+function shouldDropStoredToken(errCode) {
+    var code = "";
+    try {
+        // Repli neutre : une valeur inconnue doit être traitée comme un
+        // incident réseau, donc sans purge.
+        code = SafeLog.safeErrorCode(errCode, "network_error");
+    } catch (e) {
+        return false;
+    }
+
+    // invalid_token : /Users/Me a répondu 200 sans Id ni Name, la session
+    //                 n'est plus reconnue.
+    // http_401/403  : le serveur rejette explicitement ce token.
+    // http_400      : le serveur a bien répondu et refuse l'en-tête
+    //                 d'authentification lui-même ; le token ne repassera
+    //                 jamais en l'état, réessayer boucle indéfiniment.
+    return code === "invalid_token"
+        || code === "http_400"
+        || code === "http_401"
+        || code === "http_403";
+}
+
 function clearUserToken(serverUrl, userId) {
     var srv = _normalizeUrl(serverUrl);
     var uid = String(userId || "");
