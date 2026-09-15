@@ -5,6 +5,7 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/clientId.js" as ClientId
 import "../js/UserStore.js" as Store
 import "../js/SafeLog.js" as SafeLog
+import "../js/PressGesture.js" as PressGesture
 FocusScope {
     id: page
 
@@ -2554,7 +2555,6 @@ FocusScope {
                 property real  _armedAtMs: 0
                 property real  _downAtMs: 0
                 property real  _holdProgress: 0
-                property int   _shortTapMs: 200
                 property int   _preArmMs: 1000
                 property int   _commitMs: 1000
                 property int   _fallbackLongMs: 2000
@@ -2596,35 +2596,30 @@ FocusScope {
                     preArm.restart();
                 }
                 function _endPress() {
-                    if (!tile._pressActive) { return; }
                     var now = Date.now();
-                    var dur = now - tile._downAtMs;
-                    var selectedUid = tile.uid
-                    if (tile._armed) {
-                        var armedDur = now - tile._armedAtMs;
-                        if (armedDur >= tile._commitMs || dur >= tile._fallbackLongMs) {
-                            page._swallowOkUntilRelease();
-                            tile._resetPress();
-                            if (selectedUid) page.logoutAndRemoveById(selectedUid);
-                            return;
-                        }
-                        tile._resetPress();
-                        return;
-                    }
-                    if (dur >= tile._fallbackLongMs) {
-                        page._swallowOkUntilRelease();
-                        tile._resetPress();
-                        if (selectedUid) page.logoutAndRemoveById(selectedUid);
-                        return;
-                    }
-                    if (dur <= tile._shortTapMs) {
-                        // selectThis() peut ouvrir un overlay ou déclencher une navigation.
-                        // Nettoyer le delegate avant toute action susceptible de le détruire.
-                        tile._resetPress();
-                        tile.selectThis();
-                        return;
-                    }
+                    var selectedUid = tile.uid;
+                    // La décision appartient à PressGesture : tout relâchement qui
+                    // n'atteint pas le seuil de suppression sélectionne le profil,
+                    // y compris un appui long abandonné avant la confirmation.
+                    var action = PressGesture.decideRelease({
+                        active: tile._pressActive,
+                        dur: now - tile._downAtMs,
+                        armed: tile._armed,
+                        armedDur: tile._armed ? (now - tile._armedAtMs) : 0,
+                        commitMs: tile._commitMs,
+                        fallbackLongMs: tile._fallbackLongMs
+                    });
+                    // logoutAndRemoveById() et selectThis() peuvent reconstruire le
+                    // modèle, ouvrir un overlay ou naviguer, donc détruire ce
+                    // delegate : toujours nettoyer le press AVANT d'agir.
                     tile._resetPress();
+                    if (action === "remove") {
+                        if (!selectedUid) return;
+                        page._swallowOkUntilRelease();
+                        page.logoutAndRemoveById(selectedUid);
+                    } else if (action === "select") {
+                        tile.selectThis();
+                    }
                 }
                 function _resetPress() {
                     tile._pressActive = false;
