@@ -158,7 +158,10 @@ Vous pourrez alors vous rendre dans le Free Store sur votre Freebox Player afin 
 
 <p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
 
-
+> [!WARNING]
+> ⚠️ **Attention**
+>
+> Ton message ici.
 
 <!-- USAGE EXAMPLES -->
 ## Usage
