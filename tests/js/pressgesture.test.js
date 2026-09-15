@@ -263,3 +263,52 @@ test('nextRemoveState : "none" et identifiants manquants', () => {
     // Un armement vide ne peut jamais déclencher d'exécution.
     assertRemoveState(PressGesture.nextRemoveState(null, 'u1', 'remove'), 'u1', false);
 });
+
+/* ---------------------------------------------------------------------- */
+/* Cas propres à ServerOverlay (mêmes primitives partagées)               */
+/* ---------------------------------------------------------------------- */
+
+test('ServerOverlay : le seuil de tap court de 220 ms ne bloque plus le choix', () => {
+    // ServerOverlay utilisait _shortTapMs = 220 ms et ignorait tout
+    // relâchement entre 221 et 1999 ms. Les seuils de suppression sont
+    // identiques à ceux de LoginPage (commitMs 1000, fallbackLongMs 2000).
+    assert.equal(decide({ dur: 221, armed: false }), 'select');
+    assert.equal(decide({ dur: 500, armed: false }), 'select');
+    assert.equal(decide({ dur: 1800, armed: false }), 'select');
+    assert.equal(decide({ dur: 1700, armed: true, armedDur: 700 }), 'select');
+
+    // Et la suppression reste possible exactement aux mêmes seuils.
+    assert.equal(decide({ dur: 2000, armed: false }), 'remove');
+    assert.equal(decide({ dur: 1500, armed: true, armedDur: 1000 }), 'remove');
+});
+
+test('ServerOverlay : confirmation de suppression indexée par URL', () => {
+    // Ici l'identité d'une ligne est son URL normalisée, pas un uid : la
+    // fonction est agnostique du type d'identifiant.
+    const first = PressGesture.nextRemoveState('', 'http://nas.local:8096', 'remove');
+    assertRemoveState(first, 'http://nas.local:8096', false);
+
+    // Un appui long sur une AUTRE ligne réarme sur celle-ci.
+    assertRemoveState(
+        PressGesture.nextRemoveState(first.armedUid, 'http://autre.local:8096', 'remove'),
+        'http://autre.local:8096',
+        false
+    );
+
+    // Second appui long sur la même ligne : suppression.
+    assertRemoveState(
+        PressGesture.nextRemoveState(first.armedUid, 'http://nas.local:8096', 'remove'),
+        '',
+        true
+    );
+
+    // Un choix de serveur pendant l'armement annule la confirmation.
+    assertRemoveState(
+        PressGesture.nextRemoveState(first.armedUid, 'http://nas.local:8096', 'select'),
+        '',
+        false
+    );
+
+    // Ligne sans URL exploitable : rien n'est armé ni supprimé.
+    assertRemoveState(PressGesture.nextRemoveState('', '', 'remove'), '', false);
+});

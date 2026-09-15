@@ -9,6 +9,7 @@
 
 import QtQuick 2.15
 import "../js/jellyfinBridge.js" as Jellyfin
+import "../js/PressGesture.js" as PressGesture
 
 FocusScope {
     id: root
@@ -26,6 +27,7 @@ FocusScope {
     readonly property color uiText: "#FFFFFF"
     readonly property color uiTextSecondary: "#B8B8B8"
     readonly property color uiTextMuted: "#888888"
+    readonly property color uiDanger: "#FFB4B4"
     // Même transparence que LoginPage / ServerPage.
     // ServerOverlay : fenêtre opaque, sans transparence.
     readonly property color uiMenuPanel: "#000000"
@@ -221,6 +223,7 @@ FocusScope {
     function deactivate() {
         cancelDiscovery()
         _resetSavedHold()
+        _setRemoveArmedUrl("")
     }
 
     /* -------- FIX CLIP (zoom) -------- */
@@ -319,10 +322,26 @@ FocusScope {
     property real _savedHoldProgress: 0
     property real _savedDeleteSwallowUntilMs: 0
 
-    property int _shortTapMs: 220
     property int _preArmMs: 1000
     property int _commitMs: 1000
     property int _fallbackLongMs: 2000
+
+    /* -------- Confirmation de suppression (appui long) -------- */
+    // Même motif que la tuile de profil de LoginPage : un premier appui long
+    // arme, un second confirme. Aucun serveur mémorisé n'est supprimé sur un
+    // seul geste.
+    property string _removeArmedUrl: ""
+    Timer {
+        id: removeArmTimer
+        interval: 4000
+        repeat: false
+        onTriggered: root._removeArmedUrl = ""
+    }
+    function _setRemoveArmedUrl(url){
+        root._removeArmedUrl = url || "";
+        if (root._removeArmedUrl) removeArmTimer.restart();
+        else removeArmTimer.stop();
+    }
 
     function _resetSavedHold(){
         _savedPressActive = false;
@@ -343,19 +362,23 @@ FocusScope {
         return _normUrl(savedServers[idx] && savedServers[idx].url ? savedServers[idx].url : "");
     }
 
+    // Renvoie vrai si un appui a réellement démarré. L'appelant ne doit poser
+    // son verrou de touche (_savedKeyHeld) que dans ce cas : sinon un appui
+    // refusé laisserait le verrou posé et la liste ignorerait la touche OK.
     function _beginSavedHold(){
-        if (savedList.count<=0) return;
+        if (savedList.count<=0) return false;
         _savedHoldIndex = savedList.currentIndex|0;
         if (_savedHoldIndex < 0) _savedHoldIndex = 0;
 
         var u = _savedHoldUrl();
-        if (!u) { _resetSavedHold(); return; }
+        if (!u) { _resetSavedHold(); return false; }
 
         _savedDownAtMs = Date.now();
         _savedPressActive = true;
         _savedArmed = false;
 
         savedPreArm.restart();
+        return true;
     }
 
     function _commitSavedDelete(){
@@ -375,35 +398,51 @@ FocusScope {
         _resetSavedHold();
     }
 
+    // Un appui long arme d'abord la confirmation ; seul un second appui long
+    // sur le même serveur déclenche réellement la suppression.
+    function _requestSavedDelete(){
+        var st = PressGesture.nextRemoveState(_removeArmedUrl, _savedHoldUrl(), "remove");
+        _setRemoveArmedUrl(st.armedUid);
+        if (!st.execute) { _resetSavedHold(); return; }
+        _commitSavedDelete();
+    }
+
     function _endSavedHold(){
         if (Date.now() < _savedDeleteSwallowUntilMs) {
             _resetSavedHold();
             return;
         }
-        if (!_savedPressActive) return;
 
         var now = Date.now();
-        var dur = now - _savedDownAtMs;
+        // Même règle que les tuiles de profil : plus de seuil de tap court,
+        // tout relâchement qui n'atteint pas le seuil de suppression choisit
+        // le serveur, y compris un appui long abandonné avant la confirmation.
+        var action = PressGesture.decideRelease({
+            active: _savedPressActive,
+            dur: now - _savedDownAtMs,
+            armed: _savedArmed,
+            armedDur: _savedArmed ? (now - _savedArmedAtMs) : 0,
+            commitMs: _commitMs,
+            fallbackLongMs: _fallbackLongMs
+        });
 
-        if (_savedArmed) {
-            var armedDur = now - _savedArmedAtMs;
-            if (armedDur >= _commitMs || dur >= _fallbackLongMs) {
-                _commitSavedDelete();
-                return;
-            }
-            _resetSavedHold();
+        if (action === "remove") {
+            // _requestSavedDelete() s'appuie sur _savedHoldIndex : ne pas
+            // réinitialiser l'appui avant lui.
+            _requestSavedDelete();
             return;
         }
 
-        if (dur >= _fallbackLongMs) {
-            _commitSavedDelete();
-            return;
-        }
-
-        if (dur <= _shortTapMs) {
+        if (action === "select") {
             var s = savedServers[savedList.currentIndex|0];
+            // Choisir un serveur annule toute confirmation en attente
+            // (PressGesture.nextRemoveState(..., "select") ne rend rien d'autre).
+            _setRemoveArmedUrl("");
+            _resetSavedHold();
             if (s) root.chooseServer(s);
+            return;
         }
+
         _resetSavedHold();
     }
 
@@ -426,7 +465,7 @@ FocusScope {
         interval: root._commitMs
         repeat: false
         onTriggered: {
-            if (root._savedPressActive && root._savedArmed) root._commitSavedDelete();
+            if (root._savedPressActive && root._savedArmed) root._requestSavedDelete();
             else root._resetSavedHold();
         }
     }
@@ -464,6 +503,8 @@ FocusScope {
                                                     && root._normUrl(root.currentServerUrl) === normalizedUrl
             readonly property bool isHoldTarget: savedRow && root._savedPressActive
                                                   && index === (root._savedHoldIndex | 0)
+            readonly property bool removeArmed: savedRow && normalizedUrl !== ""
+                                                && root._removeArmedUrl === normalizedUrl
 
             Item {
                 anchors.fill: parent
@@ -512,8 +553,13 @@ FocusScope {
                         Text {
                             width: parent.width
                             textFormat: Text.PlainText
-                            text: (serverCell.server && serverCell.server.url) || ""
-                            color: root.uiTextSecondary
+                            // Pendant l'armement, la ligne d'URL porte la consigne
+                            // de confirmation : pas de ligne supplémentaire, donc
+                            // aucune bousculade de la mise en page de la carte.
+                            text: serverCell.removeArmed
+                                  ? "Appuyez encore sur OK pour supprimer"
+                                  : ((serverCell.server && serverCell.server.url) || "")
+                            color: serverCell.removeArmed ? root.uiDanger : root.uiTextSecondary
                             font.pixelSize: 14
                             elide: Text.ElideRight
                         }
@@ -620,8 +666,7 @@ FocusScope {
                     list.currentIndex = index
                     if (serverCell.savedRow) {
                         list.forceActiveFocus()
-                        root._savedKeyHeld = true
-                        root._beginSavedHold()
+                        root._savedKeyHeld = root._beginSavedHold()
                     }
                 }
                 onReleased: {
@@ -711,7 +756,12 @@ FocusScope {
                         onActiveFocusChanged: {
                             if (activeFocus) root._lastListFocused = "saved";
                             if (!activeFocus && root._savedPressActive) root._resetSavedHold();
+                            // Quitter la liste annule la confirmation en attente.
+                            if (!activeFocus) root._setRemoveArmedUrl("");
                         }
+
+                        // Changer de ligne annule la confirmation en attente.
+                        onCurrentIndexChanged: root._setRemoveArmedUrl("")
 
                         onCountChanged: {
                             if (count > 0) currentIndex = root._clamp(currentIndex|0, 0, count-1);
@@ -732,10 +782,8 @@ FocusScope {
                             if (root._isOkKey(event.key)) {
                                 event.accepted = true;
                                 if (event.isAutoRepeat) return;
-                                if (!root._savedKeyHeld) {
-                                    root._savedKeyHeld = true;
-                                    root._beginSavedHold();
-                                }
+                                if (!root._savedKeyHeld)
+                                    root._savedKeyHeld = root._beginSavedHold();
                                 return;
                             }
 
@@ -945,6 +993,7 @@ FocusScope {
     Keys.onPressed: {
         if (event.key === Qt.Key_Back || event.key === Qt.Key_Escape) {
             root._resetSavedHold();
+            root._setRemoveArmedUrl("");
             root.closeRequested();
             event.accepted = true;
         }
