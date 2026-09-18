@@ -34,6 +34,10 @@ Item {
     property string userName
     property string userImageTag
     property var    fbx
+    // Injecté par ShellPage. Les optimisations restent identiques sur les deux
+    // Players ; seule la taille de page bibliothèque diffère afin de limiter le
+    // premier burst JSON/QML sur l'Atom CE4100 de la Révolution.
+    property string playbackDeviceMode: "auto"
     property string itemId
 
     /* ========= Injection cross-pages (ShellPage.shared) ========= */
@@ -61,7 +65,10 @@ Item {
     readonly property bool folderLoadingMore: folderLoadState === "loadingMore"
 
     /* ========= Pagination visuelle bibliothèque ========= */
-    property int  folderPageSize: 220
+    // Devialet : fenêtre historique de 220 éléments.
+    // Révolution : 50 éléments, soit une seule sous-requête du bridge au premier
+    // affichage. Le préchargement anticipé existant recharge la suite avant la fin.
+    readonly property int folderPageSize: String(playbackDeviceMode || "").toLowerCase() === "revolution" ? 50 : 220
     property int  folderPageNextStart: 0
     property bool folderPageHasMore: true
     property bool folderPageHasPrevious: false
@@ -170,7 +177,9 @@ Item {
     }
     Timer {
         id: posterHqTimer
-        interval: 320
+        // Laisser la première vague de delegates/posters se stabiliser avant le
+        // remplacement HQ. Même délai sur Révolution et Devialet.
+        interval: 600
         repeat: false
         onTriggered: {
             var id = moviepage._selectedItemId()
@@ -1276,7 +1285,9 @@ Item {
 
     Timer {
         id: selectedDetailFetchTimer
-        interval: 280
+        // Le détail MediaStreams est purement décoratif pour la ligne header.
+        // Le différer évite de concurrencer la première page et ses images.
+        interval: 500
         repeat: false
         onTriggered: {
             if (moviepage.isGridInMotion) { restart(); return }
@@ -1402,6 +1413,10 @@ Item {
     onServerUrlChanged:   scheduleFetchFolder()
     onFolderIdChanged:    scheduleFetchFolder()
     onLibraryModeChanged: scheduleFetchFolder()
+    // ShellPage injecte le backend après la création du Loader. Si l'identité du
+    // Player arrive pendant le debounce initial, on annule/reprogramme proprement
+    // afin qu'une Révolution ne parte jamais sur une page Devialet de 220.
+    onPlaybackDeviceModeChanged: scheduleFetchFolder()
 
     /* ========= Fond noir + Backdrop ========= */
     Rectangle { anchors.fill: parent; color: "#000" }

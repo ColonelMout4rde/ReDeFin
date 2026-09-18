@@ -259,6 +259,19 @@ Item {
             item.userImageTag = Qt.binding(function(){ return personalMediaPage.userImageTag })
             item.fbx = Qt.binding(function(){ return personalMediaPage.fbx })
             item.shared = Qt.binding(function(){ return personalMediaPage.shared })
+
+            // Propager explicitement le modèle Freebox au MoviePage interne.
+            // MoviePage applique ainsi sa pagination optimisée :
+            // - Révolution : 50 éléments/page
+            // - Devialet   : 220 éléments/page
+            // Sans ce binding, le navigateur interne restait sur "auto" et
+            // utilisait donc la pagination Devialet même sur Révolution.
+            if (item.hasOwnProperty("playbackDeviceMode")) {
+                item.playbackDeviceMode = Qt.binding(function(){
+                    return personalMediaPage.playbackDeviceMode
+                })
+            }
+
             item.externalModalOpen = Qt.binding(function(){ return personalMediaPage.viewerOpen })
             if (personalMediaPage.startIndex >= 0) item.startIndex = personalMediaPage.startIndex
             if (personalMediaPage.restoreIndex >= 0) item.restoreIndex = personalMediaPage.restoreIndex

@@ -2104,7 +2104,35 @@ function fetchFolderItemCount(serverUrl, accessToken, userId, folderId, includeI
         onError && onError(_errCode(err, "network_error"));
     });
 }
-function _folderListFields() { return _homeListFields(); }
+function _folderListFields(typeName) {
+    // Les grilles MoviePage n'ont pas besoin du profil Home complet. Réduire les
+    // ItemFields diminue à la fois le travail serveur, la taille JSON et le coût
+    // de parsing/copie sur Freebox. Les propriétés BaseItemDto (Name, Type,
+    // ImageTags, UserData, RunTimeTicks, etc.) restent renvoyées normalement.
+    var types = _s(typeName).toLowerCase();
+    if (!types) return _homeListFields();
+
+    // Dossiers, séries et collections utilisent les compteurs dans l'UI.
+    if (types.indexOf("folder") >= 0 || types.indexOf("series") >= 0 ||
+            types.indexOf("boxset") >= 0) {
+        return _modernItemFields(
+            "PrimaryImageAspectRatio,CustomRating,ParentId," +
+            "ChildCount,RecursiveItemCount,ItemCounts"
+        );
+    }
+
+    // Médias personnels : dimensions utiles pour les photos/vidéos sans demander
+    // les très lourds MediaStreams/MediaSources sur toute la page.
+    if (types.indexOf("photo") >= 0) {
+        return _modernItemFields(
+            "PrimaryImageAspectRatio,CustomRating,ParentId,Width,Height"
+        );
+    }
+
+    // Films/vidéos : le header enrichit uniquement l'élément focalisé via
+    // fetchItem(), donc trois champs suffisent au listing initial.
+    return _modernItemFields("PrimaryImageAspectRatio,CustomRating,ParentId");
+}
 
 /* ========= Bibliothèques média unifiées : Films / Séries / Mixte ========= */
 function _encItemTypeList(typeName) {
@@ -2159,7 +2187,7 @@ function _fetchFolderItemsByTypePage(serverUrl, accessToken, userId, folderId, t
                  "&EnableTotalRecordCount=false&SortBy=" + enc(_folderServerSortBy(sortMode)) +
                  "&SortOrder=" + enc(_folderServerSortOrder(sortMode)) +
                  "&StartIndex=" + localStart + "&Limit=" + pageLimit +
-                 "&Fields=" + _folderListFields();
+                 "&Fields=" + _folderListFields(typeName);
         return _u(serverUrl, query);
     }
     function finish(more, partialCode) {
@@ -2275,13 +2303,14 @@ function fetchMixedFolderItemsPage(serverUrl, accessToken, userId, folderId, sta
                                        "Series,Folder,Movie", false,
                                        startIndex, limit, sortMode, onSuccess, onError);
 }
-// Navigation hiérarchique historique des bibliothèques Séries.
-// Conservée telle quelle pour ne pas modifier libraryMode=series.
+// Navigation hiérarchique des bibliothèques Séries. Une Series ouvre sa fiche
+// dédiée, donc Season/Episode n'ont pas à être remontés dans cette grille. On
+// conserve Folder/Movie/Video/MusicVideo pour les bibliothèques atypiques.
 function fetchMediaBrowserItemsPage(serverUrl, accessToken, userId, folderId,
                                     startIndex, limit, sortMode, onSuccess, onError) {
     return _fetchFolderItemsByTypePage(
         serverUrl, accessToken, userId, folderId,
-        "Series,Folder,Movie,Video,MusicVideo,Episode,Season", false,
+        "Series,Folder,Movie,Video,MusicVideo", false,
         startIndex, limit, sortMode, onSuccess, onError
     );
 }

@@ -204,6 +204,8 @@ FocusScope {
                 detailKind: String(ctx.detailKind || ""),
                 castIndex: (ctx.castIndex !== undefined && ctx.castIndex !== null) ? (Number(ctx.castIndex)|0) : 0,
                 castPersonId: String(ctx.personId || ""),
+                returnScrollY: (ctx.returnScrollY !== undefined && ctx.returnScrollY !== null) ? Number(ctx.returnScrollY) : null,
+                returnCastViewportY: (ctx.returnCastViewportY !== undefined && ctx.returnCastViewportY !== null) ? Number(ctx.returnCastViewportY) : null,
                 forceRefresh: false,
                 ts: Date.now()
             })

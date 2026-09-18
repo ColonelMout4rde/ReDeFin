@@ -8,7 +8,15 @@
  */
 
 var REVOLUTION_POLICY_ID = "revolution";
-var REVOLUTION_POLICY_REVISION = 9;
+var REVOLUTION_POLICY_REVISION = 10;
+
+// Sorties serveur privilégiées sur Révolution : le progressif HTTP reste utilisé
+// pour préserver StartTimeTicks/seek, mais le conteneur passe en MKV afin de
+// supporter proprement l'Embed des sous-titres texte et d'éviter le chemin MP4
+// problématique observé sur certains transcodages HEVC 4K. AV1 conserve HLS/TS.
+var REVOLUTION_TRANSCODE_VIDEO_CODEC = "h264";
+var REVOLUTION_TRANSCODE_CONTAINER_HTTP = "mkv";
+var REVOLUTION_TRANSCODE_CONTAINER_HLS = "ts";
 
 /* ================== Helpers ================== */
 function _num(v) {
@@ -195,33 +203,77 @@ function _revProfile(mode) {
         ],
 
         DirectStreamProfiles: [
+            // MKV est le conteneur de remux/progressif privilégié côté serveur.
+            // On ne l'ajoute pas au DirectPlay ici afin de ne pas élargir les
+            // chemins statiques historiques de la Révolution.
+            { Container: "mkv", Type: "Video", VideoCodec: "h264,mpeg4,mpeg2video,msmpeg4v3", AudioCodec: "aac,ac3,mp3,mp2" },
             { Container: "mp4", Type: "Video", VideoCodec: "h264,mpeg4",       AudioCodec: "aac,ac3,mp3,mp2" },
             { Container: "ts",  Type: "Video", VideoCodec: "h264,mpeg2video",  AudioCodec: "aac,ac3,mp3,mp2" }
         ],
 
         TranscodingProfiles: [],
 
+        // Contraintes matérielles du CE4100 communiquées directement à Jellyfin.
+        // Elles s'appliquent au PlaybackInfo lui-même et empêchent qu'une
+        // TranscodingUrl pré-calculée conserve une sortie H.264 UHD/10 bits.
+        CodecProfiles: [
+            {
+                Type: "Video",
+                Codec: "h264",
+                Conditions: [
+                    { Condition: "LessThanEqual", Property: "Width",         Value: "1920", IsRequired: false },
+                    { Condition: "LessThanEqual", Property: "Height",        Value: "1080", IsRequired: false },
+                    { Condition: "LessThanEqual", Property: "VideoBitDepth",  Value: "8",    IsRequired: false },
+                    { Condition: "LessThanEqual", Property: "VideoFramerate", Value: "60",   IsRequired: false },
+                    { Condition: "LessThanEqual", Property: "VideoLevel",     Value: "41",   IsRequired: false }
+                ],
+                ApplyConditions: []
+            },
+            {
+                Type: "VideoAudio",
+                Conditions: [
+                    { Condition: "LessThanEqual", Property: "AudioChannels", Value: "6", IsRequired: false }
+                ],
+                ApplyConditions: []
+            }
+        ],
+
         SubtitleProfiles: [
+            // Overlay local en DirectPlay pur.
             { Format: "srt", Method: "External" },
             { Format: "subrip", Method: "External" },
             { Format: "vtt", Method: "External" },
             { Format: "webvtt", Method: "External" },
 
+            // Flux serveur (remux/transcodage progressif) : le Core demande
+            // volontairement Embed pour éviter une sidecar locale hors DirectPlay.
+            // MKV est choisi précisément pour rendre ce contrat cohérent.
+            { Format: "srt", Method: "Embed" },
+            { Format: "subrip", Method: "Embed" },
+            { Format: "vtt", Method: "Embed" },
+            { Format: "webvtt", Method: "Embed" },
+
             // PGS sélectionné : la Révolution reçoit la piste bitmap dans un
             // remux lorsque vidéo/audio sont déjà compatibles. Si un vrai
             // transcodage est nécessaire, shouldForceSubtitleEncode() bascule
             // automatiquement vers Encode/burn-in.
-            { Format: "pgssub", Method: "Embed" }
+            { Format: "pgssub", Method: "Embed" },
+            { Format: "pgs", Method: "Embed" }
         ]
     };
 
-    if (mode === "hls") {
+    // En négociation initiale (auto), annoncer HLS/TS volontairement.
+    // Après réception des MediaSources, une incompatibilité vidéo Révolution
+    // choisit HTTP/MKV via preferredTranscodeProtocol(). Le mismatch HLS/HTTP
+    // empêche alors le Core de conserver aveuglément la TranscodingUrl initiale
+    // et le force à reconstruire l'URL finale avec MaxWidth/MaxHeight 1080p.
+    if (mode === "hls" || mode === "auto") {
         dp.TranscodingProfiles = [
-            { Container: "ts", Type: "Video", Protocol: "hls", VideoCodec: "h264", AudioCodec: "ac3,aac" }
+            { Container: REVOLUTION_TRANSCODE_CONTAINER_HLS, Type: "Video", Protocol: "hls", VideoCodec: REVOLUTION_TRANSCODE_VIDEO_CODEC, AudioCodec: "ac3,aac" }
         ];
     } else {
         dp.TranscodingProfiles = [
-            { Container: "mp4", Type: "Video", Protocol: "http", VideoCodec: "h264", AudioCodec: "ac3,aac" }
+            { Container: REVOLUTION_TRANSCODE_CONTAINER_HTTP, Type: "Video", Protocol: "http", VideoCodec: REVOLUTION_TRANSCODE_VIDEO_CODEC, AudioCodec: "ac3,aac" }
         ];
     }
 
@@ -255,7 +307,27 @@ function _revPreferredContainer(ctx, src) {
     if (ext === "ts" || ext === "m2ts" || ext === "mpg" || ext === "mpeg" || videoCodec === "mpeg2video")
         return "ts";
 
-    return "mp4";
+    // Pour tout remux/progressif serveur non-TS, utiliser MKV. Cela aligne la
+    // Révolution sur le chemin progressif fiable de la Devialet sans modifier
+    // la policy Devialet elle-même.
+    return REVOLUTION_TRANSCODE_CONTAINER_HTTP;
+}
+
+function _revPreferredTranscodeProtocol(ctx, src) {
+    var v = Core._firstStream(src, "Video");
+    var vc = _codec(v && v.Codec);
+
+    // Conserver le traitement AV1 historique en HLS/TS. Pour HEVC 4K et les
+    // autres incompatibilités vidéo, préférer HTTP/MKV afin de garder le seek
+    // serveur progressif et StartTimeTicks.
+    if (vc === "av1" || vc === "aom" || vc === "av01")
+        return "hls";
+
+    return "http";
+}
+
+function _revPreferredTranscodeVideoCodec(ctx, src) {
+    return REVOLUTION_TRANSCODE_VIDEO_CODEC;
 }
 
 function _revPreferredTranscodeAudioCodec(ctx, src, audioIndex, useHls) {
@@ -276,7 +348,7 @@ function _revAllowTranscodeAudioStreamCopy(ctx, src, audioIndex, useHls) {
 
     var a = Core._audioStreamByIndex(src, audioIndex);
     if (!a) a = Core._firstStream(src, "Audio");
-    return _num(a && a.Channels) <= 6 || _num(a && a.Channels) <= 0;
+    return _num(a && a.Channels) <= 6;
 }
 
 function _revPreferredTranscodeDimensions(ctx, src) {
@@ -348,7 +420,10 @@ function _revForceTranscode(ctx, src) {
     // laisse le Core construire un remux + SubtitleMethod=Embed.
     if (_revPgsRemuxEligible(ctx, src)) return false;
 
-    if (container === "mkv" || container === "webm" || container === "flv" || container === "ogv")
+    // MKV n'est plus une raison de réencoder la vidéo : c'est désormais le
+    // conteneur serveur privilégié pour le remux/progressif Révolution. Les
+    // conteneurs réellement non sûrs conservent le transcodage de policy.
+    if (container === "webm" || container === "flv" || container === "ogv")
         return true;
 
     return false;
@@ -365,6 +440,8 @@ function _policyObject() {
         shouldForceTranscode: _revForceTranscode,
         shouldForceSubtitleEncode: _revPgsNeedsEncode,
         requiresHardVideoTranscode: _revRequiresHardVideoTranscode,
+        preferredTranscodeProtocol: _revPreferredTranscodeProtocol,
+        preferredTranscodeVideoCodec: _revPreferredTranscodeVideoCodec,
         preferredTranscodeDimensions: _revPreferredTranscodeDimensions,
         preferredTranscodeAudioCodec: _revPreferredTranscodeAudioCodec,
         allowTranscodeAudioStreamCopy: _revAllowTranscodeAudioStreamCopy
@@ -378,7 +455,52 @@ function _ensurePolicy() {
     return true
 }
 function setFbx(fbxCtx) { if (!_ensurePolicy()) return; return Core.setFbx(fbxCtx) }
+function _cloneCtxForRevolution(ctx) {
+    var out = {};
+    ctx = ctx || {};
+
+    for (var k in ctx) {
+        try {
+            if (Object.prototype.hasOwnProperty.call(ctx, k))
+                out[k] = ctx[k];
+        } catch (e) {
+            out[k] = ctx[k];
+        }
+    }
+
+    // Quand la vidéo dépasse réellement les capacités CE4100, demander à
+    // PlaybackInfo une vraie sortie H.264 sans video-copy. Ainsi, si le Core
+    // conserve ensuite la TranscodingUrl Jellyfin, celle-ci a déjà été calculée
+    // avec la policy Révolution (MKV/H.264 + CodecProfiles 1080p/8 bits).
+    var src = null;
+    try {
+        if (out.mediaSource && out.mediaSource.MediaStreams) src = out.mediaSource;
+        else if (out.mediaSourceInfo && out.mediaSourceInfo.MediaStreams) src = out.mediaSourceInfo;
+        else if (out.source && out.source.MediaStreams) src = out.source;
+        else if (out.src && out.src.MediaStreams) src = out.src;
+        else if (out.MediaSource && out.MediaSource.MediaStreams) src = out.MediaSource;
+        else if (out.MediaSources && out.MediaSources.length) src = out.MediaSources[0];
+        else if (out.mediaSources && out.mediaSources.length) src = out.mediaSources[0];
+        else if (out.playbackInfo && out.playbackInfo.MediaSources && out.playbackInfo.MediaSources.length)
+            src = out.playbackInfo.MediaSources[0];
+    } catch (e0) { src = null; }
+
+    if (src && _revRequiresHardVideoTranscode(out, src)) {
+        out.forceAllowTranscoding = true;
+        out.forceVideoStreamCopyInPlaybackInfo = false;
+        out.forceDirectStreamInPlaybackInfo = false;
+        out.forcePlaybackInfoVideoCodec = REVOLUTION_TRANSCODE_VIDEO_CODEC;
+
+        var v = Core._firstStream(src, "Video");
+        var vc = _codec(v && v.Codec);
+        if (vc === "av1" || vc === "aom" || vc === "av01")
+            out.forceHlsProfileInPlaybackInfo = true;
+    }
+
+    return out;
+}
+
 function negotiatePlayback(ctx, onSuccess, onError) {
     if (!_ensurePolicy() || typeof Core.negotiatePlayback !== "function") { if (onError) onError("core_missing"); return }
-    return Core.negotiatePlayback(ctx, onSuccess, onError)
+    return Core.negotiatePlayback(_cloneCtxForRevolution(ctx), onSuccess, onError)
 }

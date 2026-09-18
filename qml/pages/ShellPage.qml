@@ -2318,6 +2318,15 @@ FocusScope {
             shell._cancelPendingPlayerLaunch()
             shell._directPlayReloadPending = false
             try { directPlayReloadTimer.stop() } catch(eReloadTimer) {}
+
+            // Retour PlayerOverlay -> DetailSeriePage : armer le curtain AVANT
+            // de détruire le Player. pageLoader est recréé de façon asynchrone
+            // après playerActive=false ; sans ce verrou, une frame de la fiche
+            // peut devenir visible entre deux états de chargement.
+            var returnBase = shell._baseOf(shell.currentPage).toLowerCase()
+            if (shell._circleDotsRuntimeEnabled && returnBase === "detailseriepage.qml")
+                shell._beginPageCurtainTransition()
+
             shell.playerActive = false
         }
 

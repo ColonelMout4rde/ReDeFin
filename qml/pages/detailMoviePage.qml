@@ -463,7 +463,15 @@ FocusScope {
             var forceRefresh = (marker.forceRefresh !== undefined)
                     ? (marker.forceRefresh === true)
                     : (scope !== "person")
-            if (scope === "person" && marker.castPersonId) { var a=_detailFocusApi(), s=a&&a.get?a.get(_focusKey()):null; if(a&&a.put){ if(!s) s={section:3,t:Date.now(),scrollY:0}; s.section=3; s.castIndex=(Number(marker.castIndex||0)|0); s.castPersonId=String(marker.castPersonId); a.put(_focusKey(),s) } }
+            if (scope === "person" && marker.castPersonId) {
+                var a=_detailFocusApi(), s=a&&a.get?a.get(_focusKey()):null
+                if(a&&a.put){
+                    if(!s) s={section:3,t:Date.now(),scrollY:0}
+                    s.section=3; s.castIndex=(Number(marker.castIndex||0)|0); s.castPersonId=String(marker.castPersonId)
+                    var ry=Number(marker.returnScrollY); if(isFinite(ry)&&ry>=0) s.scrollY=Math.round(ry)
+                    a.put(_focusKey(),s)
+                }
+            }
             shared.__redefinDetailReturnRefresh = null
             return _armDetailReturnRefresh(
                         reason || (scope + "-return-marker"),
@@ -677,19 +685,17 @@ FocusScope {
     }
     function _storePersonReturnContext(personObj){
         try {
-            if (!shared || !itemId || !personObj || !personObj.Id)
-                return false
+            if (!shared || !itemId || !personObj || !personObj.Id) return false
+            var snap = _getFocusSnapshot()
+            var savedY = (snap && typeof snap.scrollY === "number") ? Number(snap.scrollY) : Number(rootFlick ? rootFlick.contentY : 0)
             shared.__redefinPersonReturnContext = ({
-                detailItemId: String(itemId),
-                personId: String(personObj.Id),
+                detailItemId: String(itemId), personId: String(personObj.Id),
                 castIndex: (castPageLoader.item && castPageLoader.item.currentActorIndex !== undefined) ? (castPageLoader.item.currentActorIndex|0) : 0,
-                detailKind: "movie",
-                ts: Date.now()
+                returnScrollY: isFinite(savedY) ? Math.max(0, savedY) : 0,
+                detailKind: "movie", ts: Date.now()
             })
             return true
-        } catch(e) {
-            return false
-        }
+        } catch(e) { return false }
     }
     function _focusKey(){ return "detailMovie|" + _movieId() }
     signal requestPlay(string itemId, string accessToken, string userId, string serverUrl, string itemTitle)

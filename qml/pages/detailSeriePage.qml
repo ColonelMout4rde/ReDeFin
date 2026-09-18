@@ -460,19 +460,16 @@ FocusScope {
 
     function _storePersonReturnContext(personObj){
         try {
-            if (!shared || !itemId || !personObj || !personObj.Id)
-                return false;
+            if (!shared || !itemId || !personObj || !personObj.Id) return false;
+            var snap = _getFocusSnapshot(), savedY = (snap && typeof snap.scrollY === "number") ? Number(snap.scrollY) : Number(rootFlick ? rootFlick.contentY : 0);
+            var savedViewportY = (snap && snap.castViewportY !== undefined && snap.castViewportY !== null) ? Number(snap.castViewportY) : _castViewportY();
             shared.__redefinPersonReturnContext = ({
-                detailItemId: String(itemId),
-                personId: String(personObj.Id),
-                castIndex: (castPageLoader.item && castPageLoader.item.currentActorIndex !== undefined) ? (castPageLoader.item.currentActorIndex|0) : 0,
-                detailKind: "series",
-                ts: Date.now()
+                detailItemId: String(itemId), personId: String(personObj.Id), castIndex: (castPageLoader.item && castPageLoader.item.currentActorIndex !== undefined) ? (castPageLoader.item.currentActorIndex|0) : 0,
+                returnScrollY: isFinite(savedY) ? Math.max(0, savedY) : 0, returnCastViewportY: (savedViewportY !== null && isFinite(savedViewportY)) ? Number(savedViewportY) : null,
+                detailKind: "series", ts: Date.now()
             });
             return true;
-        } catch(e) {
-            return false;
-        }
+        } catch(e) { return false; }
     }
 
     function _consumePersonReturnRefreshMarker(){
@@ -497,7 +494,15 @@ FocusScope {
                 return false;
             }
 
-            if (marker.castPersonId) { var a=_detailFocusApi(), s=a&&a.get?a.get(_focusKey()):null; if(a&&a.put){ if(!s) s={section:3,t:Date.now(),scrollY:0}; s.section=3; s.castIndex=(Number(marker.castIndex||0)|0); s.castPersonId=String(marker.castPersonId); a.put(_focusKey(),s); } }
+            if (marker.castPersonId) {
+                var a=_detailFocusApi(), s=a&&a.get?a.get(_focusKey()):null;
+                if(a&&a.put){
+                    if(!s) s={section:3,t:Date.now(),scrollY:0}; s.section=3; s.castIndex=(Number(marker.castIndex||0)|0); s.castPersonId=String(marker.castPersonId);
+                    var ry=Number(marker.returnScrollY); if(isFinite(ry)&&ry>=0) s.scrollY=Math.round(ry);
+                    if(marker.returnCastViewportY!==undefined&&marker.returnCastViewportY!==null){ var rvy=Number(marker.returnCastViewportY); if(isFinite(rvy)) s.castViewportY=rvy; }
+                    a.put(_focusKey(),s);
+                }
+            }
             shared.__redefinDetailReturnRefresh = null;
             _personReturnGate = true;
             return true;
@@ -964,7 +969,7 @@ FocusScope {
     readonly property bool visualLoading: hardLoading
                                           || extendedLoading
                                           || seasonsStrictLoading
-                                          || _personReturnGate
+                                          || _personReturnGate || _playerNextUpRestorePending
                                           || _castViewportRestorePending
     readonly property bool shellLoading: visualLoading
     readonly property string shellLoadingError: ""
