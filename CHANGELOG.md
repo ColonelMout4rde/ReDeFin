@@ -47,10 +47,16 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
 - **Navigation dans les menus nettement plus rapide.** Principe nouveau : une
   page s'affiche dès qu'elle est utilisable et ses images arrivent ensuite en
   fondu, au lieu d'attendre derrière l'indicateur de chargement que tout soit
-  décodé. *Gains estimés à la lecture du code ; à confirmer sur boîtier.*
-  - **Toutes les pages** : l'indicateur de chargement se lève dès que la page
-    a fini de charger (jusqu'à 240 ms de moins par navigation), et son
-    animation allégée laisse le processeur à la page en construction.
+  décodé. *Un premier relevé sur Révolution a confirmé le sens des gains ; les
+  derniers changements (pages déjà visitées, fiche série, page saison) restent
+  à mesurer.*
+  - **Toutes les pages** : une page d'un type déjà visité (deuxième fiche,
+    retour à une bibliothèque, à l'accueil) n'est plus recompilée à chaque
+    fois. Mesuré sur Révolution : 1,1 à 1,6 s de construction par navigation,
+    contre environ 0,1 s quand la page est déjà connue. L'indicateur de
+    chargement se lève en outre dès que la page a fini de charger (jusqu'à
+    240 ms de moins), et son animation allégée laisse le processeur à la page
+    en construction.
   - **Accueil** : environ une seconde d'attente fixe en moins après la
     dernière réponse du serveur ; au retour sur l'accueil, les affiches ne
     retiennent plus l'affichage au-delà de 300 ms ; remonter vers une rangée
@@ -60,12 +66,16 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
     rangée suivante est prête avant la fin du glissement ; les informations
     techniques du titre sélectionné se chargent par une requête bien plus
     légère.
-  - **Fiches film, série et collection** : affichage dès l'arrivée des
-    données ; le fond part environ 300 ms plus tôt ; le logo est demandé à sa
+  - **Fiches film, série et collection** : affichage dès que l'en-tête est
+    prêt ; « À suivre », Saisons, Distribution et Titres similaires
+    apparaissent juste après, à leur place réservée ; le fond part environ 300 ms plus tôt ; le logo est demandé à sa
     taille d'affichage (il l'était en 900 × 900) ; les saisons sont demandées
     en même temps que la série ; une requête en moins pour les chapitres ; la
     durée moyenne des épisodes ne télécharge plus la liste complète des
     épisodes à chaque ouverture (elle peut être légèrement moins exacte).
+  - **Page d'une saison** : affichée dès que les épisodes sont prêts, sans
+    attendre le logo, le fond ni la fiche détaillée de l'épisode (environ
+    1,5 s de moins attendues).
   - **Serveur moins sollicité** : les listes ne demandent plus que les types
     d'images réellement affichés ; l'avatar du profil est demandé à sa taille
     d'affichage au lieu du fichier d'origine ; les affiches de l'accueil sont

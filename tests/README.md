@@ -288,7 +288,7 @@ solide au plus faible :
 
 | Niveau | Fichiers | Ce qui est vérifié |
 | --- | --- | --- |
-| Décision pure | `pagecurtainpolicy`, `gridrevealpolicy`, `detailgatepolicy`, `postersizing` | les modules `qml/js/PageCurtainPolicy.js`, `GridRevealPolicy.js`, `DetailGatePolicy.js`, `PosterSizing.js` : quand lever un rideau, quelle taille d'image demander |
+| Décision pure | `pageloadersource`, `pagecurtainpolicy`, `gridrevealpolicy`, `detailgatepolicy`, `seasonrevealpolicy`, `postersizing` | les modules `qml/js/PageLoaderSource.js`, `PageCurtainPolicy.js`, `GridRevealPolicy.js`, `DetailGatePolicy.js`, `SeasonRevealPolicy.js`, `PosterSizing.js` : quelle source donner au `Loader`, quand lever un rideau, quelle taille d'image demander |
 | Pont HTTP | `jellyfinbridgenet`, `jellyfinbridgenavimages`, `jellyfinbridgeitemtechsummary`, `jellyfinbridgerandomepisode`, `fichebridgeaverageduration` (+ `jellyfinbridgeurl`, `jellyfinbridgecache` étendus) | URL produites et valeurs renvoyées, via `bridgeharness.js` |
 | Composant réel | `tst_postercardtitlelayer`, `tst_libraryposterbadgeloaders`, `tst_homebackdrop`, `tst_chapterscarousel`, `tst_components` | `Loader` à la demande, couche de fond unique, chapitres reçus en propriété, loader allégé, avatar redimensionné |
 | Contrat sur le source | `moviepage*`, `fiche*`, `home*`, `latest*`, `posterscalequality`, `searchpagetotalrecordcount`, `guestpagemarqueeeffectsloader`, `mainsettingsguard`, `shellnavtrace`, `deadfetchguard` | une valeur ou un câblage déclaratif dans une page non instanciable (ex. « `moviepage` déclare `highlightFollowsCurrentItem: false` ») |

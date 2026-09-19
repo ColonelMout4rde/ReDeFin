@@ -29,6 +29,13 @@ FocusScope {
     property var    requestFocusBelow          // function() OR Item
     property bool   seriesScopedOnly: true
 
+    // Liste /Shows/{seriesId}/Seasons déjà obtenue par la page hôte (ex.
+    // detailSeriePage.fetchSeasons()), pour la barre de position saison
+    // (_seasonRatio()/_ensureSeasons()). Évite un second GET /Seasons
+    // identique : voir _seasonsFromHint(). Absente ou vide (pas encore
+    // arrivée) : repli sur la requête habituelle, comme avant.
+    property var    seasonsHint: null
+
     // Algo
     property int    stopGraceMs: 45000
 
@@ -450,12 +457,36 @@ FocusScope {
     property var _seasonCacheBySeries: ({})
     property int _seasonCacheVersion: 0
 
+    // Construit byIndex à partir de seasonsHint plutôt que du réseau, si la
+    // page hôte l'a déjà fournie pour cette série. seasonsHint est scopée à
+    // une seule série (celle de la page hôte) : un sId différent (rail non
+    // seriesScopedOnly, plusieurs séries mélangées) retombe sur le réseau.
+    function _seasonsFromHint(sId){
+        if (!seasonsHint || !seasonsHint.length) return null;
+        if (!sId || !seriesId || String(sId) !== String(seriesId)) return null;
+        var byIdx = {};
+        for (var i=0; i<seasonsHint.length; i++){
+            var it = seasonsHint[i] || {};
+            var idx = (it.IndexNumber!=null) ? it.IndexNumber : -1;
+            var tot = (it.EpisodeCount!=null) ? it.EpisodeCount : ((it.ChildCount!=null) ? it.ChildCount : 0);
+            if (idx>=0) byIdx[idx]=tot;
+        }
+        return byIdx;
+    }
+
     function _ensureSeasons(sId){
         if(!sId || disposed) return;
 
         var c = _seasonCacheBySeries[sId];
         if (c && c.loaded) return;
         if (c && c.inFlight) return;
+
+        var hinted = _seasonsFromHint(sId);
+        if (hinted) {
+            _seasonCacheBySeries[sId] = { loaded:true, inFlight:false, byIndex:hinted };
+            _seasonCacheVersion++;
+            return;
+        }
 
         _seasonCacheBySeries[sId] = { loaded:false, inFlight:true, byIndex:{} };
 

@@ -584,29 +584,42 @@ FocusScope {
         gateSettleTimer.restart();
     }
 
+    // Instrumentation HOME1 (mission « accueil » lot 2) : _canFinishGate()
+    // est repollé toutes les settleMs pendant tout le chargement, sans
+    // journaliser pourquoi il refuse encore de lever le rideau. Cette trace
+    // ne duplique aucune logique (elle se contente de nommer la branche déjà
+    // décidée avant chaque « return false ») afin de ne jamais introduire de
+    // second calcul qui diverge de celui qui gouverne réellement le rideau.
+    function _traceGateBlocked(cause) {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "gate blocked cause=" + cause + " dt=" + (_nowMs() - _loadingStartMs)
+                    + " sinceCreate=" + (_nowMs() - _t0))
+    }
+
     function _canFinishGate() {
         var pg = posterGridLoader.item;
-        if (!pg) {  return false; }
+        if (!pg) { _traceGateBlocked("no-postergrid"); return false; }
 
         // Jamais avant 1er fetch “confirmé”
-        if (!pg.fetchedOnce) {  return false; }
+        if (!pg.fetchedOnce) { _traceGateBlocked("fetchedOnce"); return false; }
 
         if (_fetchedOnceAtMs === 0) {
             _fetchedOnceAtMs = _nowMs();
         }
 
-        if (pg.libraryFetchCompleted !== true) {  return false; }
-        if (pg.resumeFetchCompleted !== true) {  return false; }
-        if (pg.nextUpFetchCompleted !== true) {  return false; }
-        if (pg.latestFetchCompleted !== true) {  return false; }
+        if (pg.libraryFetchCompleted !== true) { _traceGateBlocked("libraryFetchCompleted"); return false; }
+        if (pg.resumeFetchCompleted !== true) { _traceGateBlocked("resumeFetchCompleted"); return false; }
+        if (pg.nextUpFetchCompleted !== true) { _traceGateBlocked("nextUpFetchCompleted"); return false; }
+        if (pg.latestFetchCompleted !== true) { _traceGateBlocked("latestFetchCompleted"); return false; }
 
         if (!_preparePosterGridForReveal(fastHomeReturn ? "fast-return" : "initial")) {
+            _traceGateBlocked("homeRevealReady")
             return false
         }
 
         if (_waitForHomePosters
                 && !_prepareHomePosterReturn(fastHomeReturn ? "fast-return-posters"
                                                             : "external-return-posters")) {
+            _traceGateBlocked("waitForHomePosters")
             return false
         }
 
@@ -614,9 +627,9 @@ FocusScope {
         var minGate = fastHomeReturn ? 0 : minLoadingMs
         var fetchedGate = fastHomeReturn ? 0 : afterFetchedOnceMinMs
         var stableGate = fastHomeReturn ? fastReturnSettleMs : settleMs
-        if ((now - _loadingStartMs) < minGate) {  return false; }
-        if ((now - _fetchedOnceAtMs) < fetchedGate) {  return false; }
-        if ((now - _lastChangeMs) < stableGate) {  return false; }
+        if ((now - _loadingStartMs) < minGate) { _traceGateBlocked("minLoadingMs"); return false; }
+        if ((now - _fetchedOnceAtMs) < fetchedGate) { _traceGateBlocked("afterFetchedOnceMinMs"); return false; }
+        if ((now - _lastChangeMs) < stableGate) { _traceGateBlocked("settleMs"); return false; }
 
         return true;
     }

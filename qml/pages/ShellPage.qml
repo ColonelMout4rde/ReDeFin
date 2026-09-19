@@ -20,6 +20,7 @@ import "../components" as Components
 import "../js/clientId.js" as ClientId
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
+import "../js/PageLoaderSource.js" as PageLoaderSource
 import "../js/PageCurtainPolicy.js" as PageCurtainPolicy
 
 FocusScope {
@@ -43,10 +44,38 @@ FocusScope {
     // d'item).
     property double _navT0: 0
     onCurrentPageChanged: {
-        if (!currentPage) return
-        shell._navT0 = Date.now()
-        if (DevLog.ENABLED)
-            DevLog.log("NAV1", "request dt=0 page=" + shell._baseOf(currentPage).toLowerCase())
+        if (currentPage) {
+            shell._navT0 = Date.now()
+            if (DevLog.ENABLED)
+                DevLog.log("NAV1", "request dt=0 page=" + shell._baseOf(currentPage).toLowerCase())
+        }
+        shell._syncPageLoaderSource()
+    }
+
+    // Source du Loader de page. La page est chargée par son URL de BASE : la
+    // query string faisait échouer le cache de types QML à chaque item (1,1 à
+    // 1,6 s de recompilation mesurées par navigation sur Révolution, contre
+    // ~0,1 s pour un type déjà en cache). Les paramètres restent injectés en
+    // propriétés par _onPageLoaded(). Décision dans PageLoaderSource.js
+    // (tests/js/pageloadersource.test.js). Repasser pageLoaderUsesBaseUrl à
+    // false rend l'ancien comportement.
+    readonly property bool pageLoaderUsesBaseUrl: true
+    property string _pageLoaderSource: ""
+    property var _pageLoaderState: PageLoaderSource.createState()
+
+    function _syncPageLoaderSource() {
+        var next = PageLoaderSource.plan(shell._pageLoaderState,
+                                         shell._stripSensitiveQueryForCtx(shell.currentPage),
+                                         shell.playerActive,
+                                         shell.pageLoaderUsesBaseUrl)
+        if (next.noop) return
+        shell._pageLoaderState = { source: next.source, page: next.page }
+        // Un type en cache se construit sans passer par Loader.Loading : le
+        // rideau est donc armé ici, AVANT que la source change, et non plus
+        // seulement sur ce signal.
+        if (next.arm) shell._beginPageCurtainTransition()
+        shell._pageLoaderSource = next.source
+        if (next.blankFirst) Qt.callLater(shell._syncPageLoaderSource)
     }
 
     /* ===================== UPDATE CHECK ===================== */
@@ -1430,6 +1459,7 @@ FocusScope {
     }
     onPlayerActiveChanged: {
         quarantineFbxMms(playerActive)
+        shell._syncPageLoaderSource()
 
         if (!playerActive && !_directPlayReloadPending) {
             Qt.callLater(function() {
@@ -1556,6 +1586,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
+        // La valeur initiale de currentPage n'émet pas de signal de changement.
+        shell._syncPageLoaderSource()
         _installSharedNavApi()
         _installSharedDetailFocusApi()
         try { if (JellyfinBridge.setFbx) JellyfinBridge.setFbx(fbx) } catch(e) {}
@@ -2160,7 +2192,7 @@ FocusScope {
     Loader {
         id: pageLoader
         anchors.fill: parent
-        source: !playerActive ? _stripSensitiveQueryForCtx(currentPage) : ""
+        source: shell._pageLoaderSource
         visible: !playerActive
         asynchronous: true
         onStatusChanged: {
@@ -2179,7 +2211,7 @@ FocusScope {
                 if (DevLog.ENABLED)
                     DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
                                " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
-                               " reason=loader-error")
+                               " reason=" + (status === Loader.Null ? "unloaded" : "loader-error"))
             } else if (status === Loader.Ready) {
                 if (DevLog.ENABLED)
                     DevLog.log("NAV3", "ready dt=" + (Date.now() - shell._navT0) +

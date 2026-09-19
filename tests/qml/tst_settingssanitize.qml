@@ -412,4 +412,32 @@ TestCase {
 
         destroyApp(app);
     }
+
+    // Le Loader de page reçoit l'URL de BASE : la query string faisait
+    // recompiler la page à chaque item sur le Player (audit shell, F1).
+    function test_pageLoader_usesBaseUrlAndForgetsQueryString() {
+        var app = newApp();
+        var shell = testCase._findShellPage(app, 16);
+        verify(shell !== null, "ShellPage introuvable dans l'arbre main.qml");
+
+        compare(shell._pageLoaderSource, "SplashPage.qml", "page initiale chargée sans signal de changement");
+
+        // Le lecteur vide le Loader ; son retour recharge la même page.
+        shell.playerActive = true;
+        compare(shell._pageLoaderSource, "");
+        shell.playerActive = false;
+        compare(shell._pageLoaderSource, "SplashPage.qml");
+
+        // Une page inexistante suffit : seul le texte de la source est vérifié,
+        // aucune page réelle (donc aucun réseau) n'est instanciée.
+        shell.currentPage = "pageabsente.qml?ctx=1&itemId=abc";
+        compare(shell._pageLoaderSource, "pageabsente.qml");
+
+        // Même composant, autres paramètres : vidé, puis rechargé au tour suivant.
+        shell.currentPage = "pageabsente.qml?ctx=1&itemId=def";
+        compare(shell._pageLoaderSource, "");
+        tryCompare(shell, "_pageLoaderSource", "pageabsente.qml", 1000);
+
+        destroyApp(app);
+    }
 }

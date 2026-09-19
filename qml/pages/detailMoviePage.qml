@@ -343,10 +343,14 @@ FocusScope {
         itemReady: gateItemReady,
         minDelayReady: gateMinDelay
     })
-    /* ===== Loading étendu semi-strict (hero + premières sections movie) =====
-       On garde le CircleDotsLoader jusqu'à ce que le hero soit prêt ET que les blocs
-       Cast / Similar soient au moins instanciés ou déclarés vides. Cast/Similar gardent
-       leur logique lazy, avec timeout de sécurité pour éviter un écran noir infini. */
+    /* ===== gateCastBlockReady/gateSimilarBlockReady/gateLayoutReady =====
+       Décision produit (lot 2, BRIEF-COMMUN.md) : ces gates ne retiennent plus
+       le rideau (même défaut que la fiche série, MESURES.md « fiche série » :
+       gate=nextUp/gate=seasons retenaient le rideau après hardLoading).
+       Distribution et Similaires arrivent après le rideau, sous rideau levé ;
+       ces propriétés restent calculées uniquement pour l'instrumentation
+       FICHE5 (mesurer quand Cast/Similar finissent réellement de charger),
+       plus le filet extendedLoadingTimeout. */
     property bool gateCastBlockReady: false
     property bool gateSimilarBlockReady: false
     property bool gateLayoutReady: false
@@ -365,7 +369,14 @@ FocusScope {
     // le snapshot chaud ne doit jamais être exposé seul. Il peut être préparé en
     // arrière-plan, mais le curtain reste actif pour éviter le flash "fiche -> loader".
     property bool initialAuthoritativeFetchPending: true
-    readonly property bool baseVisualLoading: hardLoading || extendedLoading
+    // Le rideau se lève dès que l'en-tête est peuplé (hardLoading), sans
+    // attendre Cast/Similar (extendedLoading, voir plus haut) : seuls
+    // detailReturnRefreshGate/initialAuthoritativeFetchPending restent des
+    // défauts fonctionnels légitimes après hardLoading (retour de fiche pas
+    // encore rafraîchi, snapshot pas encore autoritaire).
+    readonly property bool baseVisualLoading: DetailGatePolicy.detailCurtainActive({
+        hardLoading: hardLoading
+    })
     readonly property bool visualLoading: baseVisualLoading || detailReturnRefreshGate || initialAuthoritativeFetchPending
     readonly property bool isLoading: visualLoading
     readonly property bool shellLoading: visualLoading
