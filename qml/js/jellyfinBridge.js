@@ -3041,21 +3041,42 @@ function fetchSeriesPlayableEpisodeIds(serverUrl, accessToken, userId, seriesId,
 }
 function fetchSeriesAverageEpisodeRuntimeTicks(serverUrl, accessToken, userId, seriesId, fallbackTicks, onSuccess, onError) {
     var fb = MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks);
+    // F4 (audit-fiches.md) : la série connaît déjà sa durée moyenne d'épisode
+    // via RunTimeTicks la plupart du temps. Paginer TOUS ses épisodes
+    // pendant l'ouverture de la fiche rien que pour retomber sur cette même
+    // valeur coûtait un aller-retour réseau et un JSON.parse potentiellement
+    // gros sur le thread GUI du Révolution, pour rien : ce cas répond
+    // maintenant sans requête.
+    if (fb > 0) { onSuccess && onSuccess(fb); return _completedHttpHandle(); }
     if (!serverUrl || !accessToken || !userId || !seriesId) {
-        if (fb > 0) { onSuccess && onSuccess(fb); return _completedHttpHandle(); }
         onError && onError("missing_params");
         return _completedHttpHandle();
     }
-    return _fetchSeriesLightEpisodeItems(serverUrl, accessToken, userId, seriesId, function (items) {
+    // Pas de RunTimeTicks connu : un seul appel borné (Limit=20) suffit à
+    // estimer une moyenne raisonnable, au lieu de paginer toute la série par
+    // pages de 100 (jusqu'à 3000 épisodes) via _fetchSeriesLightEpisodeItems,
+    // qui reste utilisé tel quel par la construction de playlist (elle a
+    // besoin de la liste complète, pas d'une estimation).
+    var url = _u(serverUrl,
+        "/Shows/" + enc(seriesId) +
+        "/Episodes?UserId=" + enc(userId) +
+        "&IsMissing=false" +
+        "&IsVirtualUnaired=false" +
+        "&EnableImages=false&EnableUserData=false" +
+        "&EnableTotalRecordCount=false" +
+        "&SortBy=ParentIndexNumber,IndexNumber" +
+        "&SortOrder=Ascending" +
+        "&Limit=20"
+    );
+    return sendRequest("get", url, headersWithToken(accessToken), null, function (res) {
+        var items = _itemsArrayFromResponse(res && res.json);
         var eps = [];
         for (var i = 0; items && i < items.length; i++) {
-            var ep = items[i];
-            if (MediaCatalog.episodeIsPlayableForPlaylist(ep)) eps.push(ep);
+            if (MediaCatalog.episodeIsPlayableForPlaylist(items[i])) eps.push(items[i]);
         }
         onSuccess && onSuccess(MediaCatalog.averageEpisodeRuntimeTicks(eps, fb));
     }, function (err) {
-        if (fb > 0) { onSuccess && onSuccess(fb); return; }
-        onError && onError(err || "network_error");
+        onError && onError(_errCode(err, "network_error"));
     });
 }
 function buildRandomPlayableSeriesPlaylist(serverUrl, accessToken, userId, seriesId, onSuccess, onError) {

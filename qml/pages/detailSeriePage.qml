@@ -113,6 +113,10 @@ FocusScope {
     property bool averageEpisodeDurationLoading: false
     property int _avgDurationSeq: 0
     property var _avgDurationHandle: null
+    // F4 : appel réseau différé jusqu'à la levée du rideau (voir
+    // _refreshAverageEpisodeDuration()/onHardLoadingChanged plus bas).
+    property string _avgDurationDeferredSeriesId: ""
+    property int _avgDurationDeferredFallbackTicks: 0
     function _applyAverageDurationTicks(ticks){
         var t = Number(ticks || 0);
         averageEpisodeDurationText = t > 0 ? SeasonUtils.formatTicksToHhMm(t) : "";
@@ -124,14 +128,10 @@ FocusScope {
         try { if (h && h.cancel) h.cancel("context_changed") } catch(e) {}
         averageEpisodeDurationLoading = false
         averageEpisodeDurationText = ""
+        _avgDurationDeferredSeriesId = ""
+        _avgDurationDeferredFallbackTicks = 0
     }
-    function _refreshAverageEpisodeDuration(){
-        _resetAverageEpisodeDuration();
-        var sid = _seriesId(), fallbackTicks = item ? Number(item.RunTimeTicks || 0) : 0;
-        if (!serverUrl || !accessToken || !userId || !sid || !Jellyfin.fetchSeriesAverageEpisodeRuntimeTicks) {
-            _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
-            return;
-        }
+    function _launchAverageEpisodeDurationRequest(sid, fallbackTicks){
         var seq = ++_avgDurationSeq;
         averageEpisodeDurationLoading = true;
         var requestHandle = null
@@ -147,6 +147,27 @@ FocusScope {
             _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
         });
         _avgDurationHandle = requestHandle
+    }
+    function _refreshAverageEpisodeDuration(){
+        _resetAverageEpisodeDuration();
+        var sid = _seriesId(), fallbackTicks = item ? Number(item.RunTimeTicks || 0) : 0;
+        if (!serverUrl || !accessToken || !userId || !sid || !Jellyfin.fetchSeriesAverageEpisodeRuntimeTicks) {
+            _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
+            return;
+        }
+        // F4 (audit-fiches.md) : quand la série connaît déjà une durée
+        // d'épisode plausible (RunTimeTicks), le bridge répond sans requête
+        // réseau (voir fetchSeriesAverageEpisodeRuntimeTicks) : rien à
+        // différer. Sinon, l'estimation nécessite un appel réseau borné
+        // (Limit=20 côté bridge) ; le différer jusqu'à la levée du rideau
+        // évite de le faire concourir avec l'item et les saisons sur le
+        // chemin critique.
+        if (MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks) > 0 || !hardLoading) {
+            _launchAverageEpisodeDurationRequest(sid, fallbackTicks);
+            return;
+        }
+        _avgDurationDeferredSeriesId = sid;
+        _avgDurationDeferredFallbackTicks = fallbackTicks;
     }
     property string nextUpDurationText: ""
     property string nextUpEndText: ""
@@ -1222,6 +1243,16 @@ FocusScope {
             _updateNextUpMeta();
             _schedulePokeRestore();
             _scheduleViewportGate();
+            // F4 : lance la requête de durée moyenne différée pendant le
+            // rideau (voir _refreshAverageEpisodeDuration()), maintenant que
+            // la fiche est affichée.
+            if (_avgDurationDeferredSeriesId) {
+                var avgSid = _avgDurationDeferredSeriesId
+                var avgFallback = _avgDurationDeferredFallbackTicks
+                _avgDurationDeferredSeriesId = ""
+                _avgDurationDeferredFallbackTicks = 0
+                _launchAverageEpisodeDurationRequest(avgSid, avgFallback)
+            }
         }
     }
     // FICHE : trace la levée de chaque garde, avec son nom pour raison.
