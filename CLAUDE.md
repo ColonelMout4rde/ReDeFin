@@ -47,6 +47,8 @@ python3 -m unittest discover -s tests/py -v
 
 `node --test tests/js/` (a directory) fails on Node 24; always pass files. `qmllint` only fails the build on `[syntax]`; the thousands of `[unqualified]`/`[missing-property]` warnings from linting Qt 5 code with Qt 6 are expected.
 
+CI (`.github/workflows/ci.yml`, every push / PR / manual) runs exactly `./tools/setup-qt-tools.sh`, `./check.sh`, `./build.sh` on a clean Ubuntu runner and uploads the `.fbxqml` as an artifact. Node, Python and PySide6 (`REDEFIN_PYSIDE_VERSION`, honoured by the setup script) are pinned in its `env` block: bump them deliberately, in their own commit. Anything added to `check.sh` is automatically part of CI; never add a check to the workflow only.
+
 Build a package (`build/ReDeFin_<manifest version>.fbxqml`; `-o` for another path; `-v <ref.fbxqml>` compares file list and per-file SHA-256 with a reference package):
 
 ```bash
