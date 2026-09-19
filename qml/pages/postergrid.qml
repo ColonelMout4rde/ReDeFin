@@ -1584,9 +1584,22 @@ Item {
         if (!_focusRestorePending && !_restoringFocus) postergrid.currentLatestGroup = MediaCatalog.clampIndex(postergrid.currentLatestGroup, out.length)
     }
     function _rebuildLatestByFolderFromTemp() {
-        postergrid._publishLatestFromTemp()
         postergrid._latestAllComplete = postergrid._latestQueueDone()
         postergrid.latestFetchCompleted = postergrid._latestAllComplete
+        // Constat 1 de l'audit accueil : avant que l'accueil ne soit révélé
+        // une première fois, chaque bibliothèque Latest reçue republiait
+        // latestByFolder, ce qui vide et régénère tout le Repeater
+        // (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6 fois pour
+        // 6 bibliothèques, alors que le rideau attend de toute façon la
+        // dernière. On ne publie donc qu'une fois toutes les réponses
+        // attendues arrivées (_latestAllComplete, y compris via le timeout
+        // existant qui force cet état dans forceHomeBootstrapCompletion).
+        // Une fois l'accueil déjà révélé une première fois (homeRevealReady),
+        // la publication incrémentale habituelle reprend : chargement par
+        // proximité en défilant, rechargement d'une section évincée.
+        if (postergrid._homeRevealReady || postergrid._latestAllComplete) {
+            postergrid._publishLatestFromTemp()
+        }
     }
     function _fetchLatestForFolderId(parentId, limit, groupItems, ok, ko) {
         return Jellyfin.fetchHomeLatestItemsForParent(
