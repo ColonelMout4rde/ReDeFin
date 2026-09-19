@@ -20,7 +20,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadQmlJs } = require('./qmljs');
-const { SERVER, loadRouter, V, A, source } = require('./negotiationmatrixfixtures');
+const {
+    SERVER, loadRouter, negotiate, manualQualityCtx, V, A, source,
+} = require('./negotiationmatrixfixtures');
 
 const MEDIA = source('mkv', '/m/film.mkv', [V.h264, A.ac351]);
 
@@ -247,6 +249,59 @@ test('le plafond de débit ReDeFin est imposé à tous les profils', () => {
         assert.equal(body.DeviceProfile.MaxStreamingBitrate, 200000000, device);
         assert.equal(body.DeviceProfile.MaxStaticBitrate, 200000000, device);
     }
+});
+
+/* ===== 4 bis. Préparation du contexte par les policies (caractérisation) =====
+ *
+ * Les deux policies clonent le contexte AVANT l'appel à /PlaybackInfo, et y
+ * cherchent une MediaSource que le Core n'y met jamais. Les cas ci-dessous
+ * figent ce que ce code fait RÉELLEMENT aujourd'hui, pour qu'un import amont
+ * qui le rendrait enfin actif — ou qui casserait la protection réelle, la
+ * reconstruction de l'URL finale — devienne visible.
+ */
+
+test('caractérisation : chaque /PlaybackInfo Devialet part en mode strict', () => {
+    // _needsStrictPlaybackInfo() retombe toujours sur `if (!src) return true`,
+    // même pour un H.264 + AC3 qui finira en lecture directe.
+    const body = sentProfile('devialet');
+    assert.equal(body.EnableDirectStream, false);
+    assert.equal(body.AllowVideoStreamCopy, false);
+    assert.equal(body.VideoCodec, 'h264');
+    assert.equal(body.DeviceProfile.TranscodingProfiles[0].Protocol, 'hls',
+        'forceHlsProfileInPlaybackInfo est posé systématiquement');
+
+    // Sans conséquence visible : le Core tranche ensuite pour la lecture
+    // directe du fichier d'origine.
+    const neg = negotiate('devialet', MEDIA, {});
+    assert.match(neg.url, /static=true/);
+});
+
+test('caractérisation : forcePlaybackInfoMaxStreamingBitrate n\'est lu par personne', () => {
+    // La policy Devialet le pose à 200 Mb/s, mais le Core n'envoie que
+    // REDEFIN_MAX_STREAMING_BITRATE ou le débit choisi à la main.
+    const { Router, bodies } = loadRouter(MEDIA);
+    Router.setDeviceMode('devialet');
+    Router.negotiatePlayback(Object.assign({
+        serverUrl: SERVER, accessToken: 'TOK', itemId: 'IT1', userId: 'U1', startMs: 0,
+    }, manualQualityCtx(4000000)), () => {}, () => {});
+    assert.equal(bodies[bodies.length - 1].MaxStreamingBitrate, 4000000);
+});
+
+test('caractérisation : le clone Révolution ne voit jamais la MediaSource', () => {
+    // Le bloc « PlaybackInfo strict » de _cloneCtxForRevolution ne s'exécute
+    // pas, même pour un HEVC 4K : aucun forçage n'apparaît dans le corps.
+    const uhd = source('mkv', '/m/film.mkv', [V.hevc4k, A.ac351]);
+    const neg = negotiate('revolution', uhd, {});
+    assert.equal(neg.body.VideoCodec, null);
+    assert.equal(neg.body.AllowVideoStreamCopy, true);
+    assert.equal(neg.body.EnableDirectStream, true);
+
+    // La vraie protection est en aval : l'URL finale est reconstruite dans
+    // l'enveloppe CE4100, le boîtier ne reçoit jamais le HEVC 4K.
+    assert.equal(neg.params.VideoCodec, 'h264');
+    assert.equal(neg.params.MaxWidth, '1920');
+    assert.equal(neg.params.MaxHeight, '1080');
+    assert.equal(neg.params.AllowVideoStreamCopy, 'false');
 });
 
 /* ===== 5. Routage par Device.model ===== */

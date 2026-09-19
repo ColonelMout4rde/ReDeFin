@@ -233,6 +233,13 @@ function _needsStrictPlaybackInfo(ctx) {
     // Le Core peut ne pas encore avoir injecté la MediaSource au moment du clone ctx.
     // Dans ce cas, on garde le comportement strict historique pour éviter que Jellyfin
     // prépare une session AV1 en copy vidéo avant l'analyse complète.
+    //
+    // ÉTAT RÉEL : c'est TOUJOURS ce repli qui s'applique. Le clone précède
+    // l'appel à /PlaybackInfo et le Core ne met jamais de MediaSource dans
+    // ctx, donc _ctxMediaSource() retourne null et la ligne suivante est
+    // morte : chaque PlaybackInfo Devialet part en strict (EnableDirectStream
+    // false, AllowVideoStreamCopy false, VideoCodec h264, profil HLS). Sans
+    // conséquence visible, le Core décidant ensuite lui-même du DirectPlay.
     if (!src) return true
 
     return _videoNeedsRealTranscode(src)
@@ -272,6 +279,9 @@ function _cloneCtxForDevialet(ctx) {
         out.forcePlaybackInfoAudioCodec = ""
     }
 
+    // Aucun lecteur dans le Core actuel : le plafond réellement envoyé est
+    // REDEFIN_MAX_STREAMING_BITRATE (même valeur), ou le débit choisi à la
+    // main quand il y en a un. Conservé comme indication d'intention amont.
     out.forcePlaybackInfoMaxStreamingBitrate = DEVIALET_MAX_STREAMING_BITRATE
 
     return out

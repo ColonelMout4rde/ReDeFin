@@ -495,10 +495,20 @@ function _cloneCtxForRevolution(ctx) {
         }
     }
 
-    // Quand la vidéo dépasse réellement les capacités CE4100, demander à
-    // PlaybackInfo une vraie sortie H.264 sans video-copy. Ainsi, si le Core
-    // conserve ensuite la TranscodingUrl Jellyfin, celle-ci a déjà été calculée
-    // avec la policy Révolution (MKV/H.264 + CodecProfiles 1080p/8 bits).
+    // Intention : quand la vidéo dépasse réellement les capacités CE4100,
+    // demander à PlaybackInfo une vraie sortie H.264 sans video-copy, pour que
+    // la TranscodingUrl éventuellement conservée par le Core ait déjà été
+    // calculée avec la policy Révolution (MKV/H.264 + CodecProfiles 1080p).
+    //
+    // ÉTAT RÉEL : ce bloc ne s'exécute JAMAIS. Le clone a lieu AVANT l'appel à
+    // /PlaybackInfo et le Core ne met aucune MediaSource dans ctx, donc la
+    // recherche ci-dessous retourne toujours null — y compris pour un HEVC 4K.
+    // Ce n'est pas une protection manquante : l'enveloppe 1080p/8 bits/H.264
+    // est garantie en aval par _revProfile() (CodecProfiles envoyés au
+    // serveur) et par la reconstruction de l'URL finale côté client, que le
+    // désaccord HLS/HTTP décrit plus haut rend obligatoire. Conservé tel quel
+    // pour ne pas diverger de l'amont ; toute modification doit être testée
+    // sur boîtier.
     var src = null;
     try {
         if (out.mediaSource && out.mediaSource.MediaStreams) src = out.mediaSource;
