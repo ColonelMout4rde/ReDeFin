@@ -518,6 +518,68 @@ TestCase {
         }
     }
 
+    // Marche récursive générique dans l'arbre d'objets QML, pour atteindre un
+    // enfant interne sans alias public (même principe que
+    // tests/qml/tst_settingssanitize.qml, dupliqué ici pour rester
+    // autonome : ce fichier n'importe rien d'autre).
+    function _collectChildren(obj) {
+        var out = [];
+        if (!obj) return out;
+        try {
+            var d = obj.data;
+            if (d) for (var i = 0; i < d.length; i++) if (d[i]) out.push(d[i]);
+        } catch (e0) {}
+        try {
+            var c = obj.children;
+            if (c) for (var j = 0; j < c.length; j++) {
+                if (c[j] && out.indexOf(c[j]) < 0) out.push(c[j]);
+            }
+        } catch (e1) {}
+        return out;
+    }
+
+    function _findByFunctionName(root, fnName, maxDepth) {
+        if (!root || maxDepth <= 0) return null;
+        try {
+            if (typeof root[fnName] === "function") return root;
+        } catch (e0) {}
+        var kids = testCase._collectChildren(root);
+        for (var i = 0; i < kids.length; i++) {
+            var found = testCase._findByFunctionName(kids[i], fnName, maxDepth - 1);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    // F5 (audit shell) : le fallback statique de l'avatar (avatarWrap,
+    // interne à ClockHUD) demandait autrefois Store.staticAvatarUrl()
+    // directement, sans paramètre de taille, alors qu'il s'affiche à
+    // hud.avatarSize. _avatarHoldUrl() doit maintenant toujours passer par le
+    // chemin qui ajoute fillWidth/fillHeight/quality adaptés à la taille
+    // affichée (reqAva=70 est le plancher interne de qualité). La logique
+    // GIF/AnimatedImage (_stableAnimUrl/animSrc) n'est pas concernée par ce
+    // test.
+    function test_clockHud_staticAvatarUrlIsResizedToDisplaySize() {
+        var hud = createTemporaryObject(clockHudComponent, testCase, {
+            serverUrl: "http://jellyfin.test:8096",
+            userId: "user-1",
+            userImageTag: "tag-1",
+            avatarSize: 46
+        });
+        verify(hud !== null, "ClockHUD.qml n'a pas pu être instanciée");
+
+        var avatarWrap = testCase._findByFunctionName(hud, "_avatarHoldUrl", 12);
+        verify(avatarWrap !== null, "avatarWrap (fallback statique) introuvable dans ClockHUD.qml");
+
+        var url = avatarWrap._avatarHoldUrl();
+        verify(url.length > 0, "une URL statique doit être construite quand le contexte est complet");
+        verify(url.indexOf("format=jpg") >= 0, "le fallback statique doit rester un JPEG");
+        verify(url.indexOf("fillWidth=70") >= 0,
+               "70 = max(reqAva=70, avatarSize=46) : " + url);
+        verify(url.indexOf("fillHeight=70") >= 0, url);
+        verify(url.indexOf("quality=85") >= 0, url);
+    }
+
     /* ===================== SeasonEpisodesRow (smoke minimal) ===================== */
 
     Component {

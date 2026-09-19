@@ -397,11 +397,21 @@ Item {
                     : ""
 
                 function _avatarHoldUrl() {
-                    try {
-                        if (hud.serverUrl && hud.serverUrl.length && hud.userId && hud.userId.length && hud.userImageTag && hud.userImageTag.length)
-                            return Store.staticAvatarUrl(hud.serverUrl, hud.userId, hud.userImageTag)
-                    } catch (e) {}
-
+                    // F5 (audit shell) : ce chemin statique servait autrefois
+                    // directement Store.staticAvatarUrl() (UserStore.js, hors
+                    // zone), qui répond volontairement sans paramètre de
+                    // redimensionnement (contrat d'URL simple et stable pour
+                    // les autres appelants). Résultat : l'avatar plein format
+                    // (~2 Mo au dire du code) était rechargé et décodé à
+                    // chaque page, alors qu'il s'affiche ici à
+                    // hud.avatarSize (46 px par défaut). Le code ci-dessous
+                    // ajoutait déjà fillWidth/fillHeight/quality adaptés à la
+                    // taille affichée, mais n'était jamais atteint dans le
+                    // cas courant à cause du retour anticipé ci-dessus : on
+                    // le supprime pour toujours passer par le chemin
+                    // redimensionné. Uniquement le fallback statique
+                    // (avatarStaticReady) : la logique GIF/AnimatedImage
+                    // (_stableAnimUrl/animSrc) n'est pas concernée.
                     var u = hud._avatarRemoveParams(Jellyfin.stripAuthQueryFromUrl(_displayBaseUrl()), [
                         "fbx" + "loop", "format", "fillwidth", "fillheight",
                         "maxwidth", "maxheight", "quality", "_v"
