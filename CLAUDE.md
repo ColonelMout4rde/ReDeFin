@@ -69,7 +69,7 @@ python3 tools/fbx-run.py -t <player-ip> -v 2>&1 | tee build/run.log
 
 ### Debugging on device
 
-`qml/js/SafeLog.js` is deliberately neutralised in the public build and `qml/**` must not contain `console.log` on `main`. To investigate on device, create a `debug/*` branch carrying temporary `console.log("[RDF] …")` traces (they appear in the `fbx-run.py` output as `qml: <file>: [RDF] …`), never merge it, and mask tokens in any URL you log. Every identifier used in a trace must be in scope: an exception inside the playback paths breaks playback.
+`qml/js/SafeLog.js` is deliberately neutralised in the public build and `qml/**` must not call `console.log` directly. Traces go through `qml/js/DevLog.js`: `DevLog.log(tag, message)` is a no-op because `ENABLED` is `false` in the repository and in every package. `tools/fbx-run.py` serves that single file with the flag flipped to `true` on the fly (never on disk), so traces exist only in a developer-mode run and show up as `qml: <file>: [RDF] <tag> <message>`; `--no-dev-log` reproduces the public behaviour. `build.sh` and a Node test both refuse an enabled flag, and the exact line `var ENABLED = false;` must not be reformatted. The player is already instrumented (tags T1–T16: track pick, negotiation result, hard source reset phases, MediaPlayer errors and state changes, loading gate arm/release with reason, deferred reload, transport lock, focus restore). When adding traces: wrap URLs in `DevLog.maskUrl()`, keep every identifier in scope (an exception inside the playback paths breaks playback), and guard hot paths with `if (DevLog.ENABLED)`.
 
 Qt 5.15 `MediaPlayer` codes seen in traces: `status` 1 NoMedia, 2 Loading, 3 Loaded, 4 Stalled, 5 Buffering, 6 Buffered, 7 EndOfMedia, 8 InvalidMedia; `playbackState` 0 Stopped, 1 Playing, 2 Paused.
 
@@ -98,7 +98,7 @@ Boot flow: `SplashPage` → stored profile picker (`LoginPage`, the "Qui regarde
 
 ## Conventions
 
-- Application code under `qml/` is **ES5** (no `let`/`const`/arrow functions/template strings/classes), uses no `QtQuick.Controls`, has French comments, and no `console.log`. Tests and tooling may use modern JS/Python.
+- Application code under `qml/` is **ES5** (no `let`/`const`/arrow functions/template strings/classes), uses no `QtQuick.Controls`, has French comments, and no direct `console.log` (use `DevLog`). Tests and tooling may use modern JS/Python.
 - Put decision logic in a `.pragma library` module with no global mutable state and test it with Node via `tests/js/qmljs.js` (`loadQmlJs(path, {stubs})` evaluates a QML JS module, resolving `.import`, and returns its top-level symbols; objects it returns come from another realm, so compare fields rather than using `deepStrictEqual`). Test QML wiring with Qt Quick Test by instantiating the real page where possible (`tests/qml/tst_profiletile.qml` loads the actual `LoginPage.qml` with an empty `serverUrl` so no network is touched). `tests/qml/stubs/` provides `fbx.system` and `QtGraphicalEffects`; extend the stubs when a page needs more.
 - New files in `qml/js`, `qml/pages`, `qml/components`, `qml/images` are packaged automatically. A new **directory** must be added to both `ReDeFin.fbxproject` and the mirrored list in `build.sh`.
 - One logical change per commit, each passing `./check.sh`, each with its test, so every fix can be offered upstream on its own (as `git format-patch` patches attached to an issue, since upstream has no source tree to target). Commit messages: imperative title, body explaining bug, mechanism, fix and tests. Never commit `build/`.

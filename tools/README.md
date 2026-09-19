@@ -35,6 +35,11 @@ tools/fbx-run.py --help
 - `-v/--verbose` : journalise chaque requête HTTP du Player (utile pour
   voir quels fichiers il charge réellement).
 - `--timeout SECONDES` : délai JSON-RPC (défaut 10 s).
+- `--no-dev-log` : n'active pas le journal de debug de l'application. Par
+  défaut le serveur sert `qml/js/DevLog.js` avec son drapeau `ENABLED`
+  basculé sur `true` (à la volée, jamais sur disque), ce qui fait apparaître
+  les traces `[RDF]` ; avec cette option l'application se comporte comme le
+  paquet public.
 - `--player-port PORT` : port du protocole côté Player (défaut 80 ; ne
   sert qu'aux tests avec un faux Player sur un port libre).
 

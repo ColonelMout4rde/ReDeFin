@@ -33,6 +33,7 @@ import functools
 import http.server
 import json
 import os
+import posixpath
 import random
 import re
 import socket
@@ -181,6 +182,27 @@ def load_and_validate_manifest(manifest_path, entry_name):
 # Serveur HTTP local (sert le répertoire de l'application)
 # --------------------------------------------------------------------------
 
+# Journal de diagnostic de l'application (qml/js/DevLog.js) : le dépôt et les
+# paquets contiennent le drapeau à false ; ce serveur le bascule à la volée,
+# sans jamais toucher au fichier sur disque.
+DEVLOG_URL_PATH = "/qml/js/DevLog.js"
+DEVLOG_FLAG_OFF = b"var ENABLED = false;"
+DEVLOG_FLAG_ON = b"var ENABLED = true;"
+
+
+def enable_devlog_source(data):
+    """Renvoie le contenu de DevLog.js avec le drapeau activé. Lève
+    FbxRunError si la ligne du drapeau n'est pas présente exactement une
+    fois (fichier reformaté ou déjà activé)."""
+    if data.count(DEVLOG_FLAG_OFF) != 1 or DEVLOG_FLAG_ON in data:
+        raise FbxRunError(
+            "qml/js/DevLog.js ne contient pas exactement une ligne "
+            "'{}' : impossible d'activer le journal de debug."
+            .format(DEVLOG_FLAG_OFF.decode())
+        )
+    return data.replace(DEVLOG_FLAG_OFF, DEVLOG_FLAG_ON)
+
+
 def _is_forbidden_path(url_path):
     """Vrai si le chemin demandé ne doit jamais être servi : fichiers
     cachés (dont .git/...), et répertoires build/, tests/, tools/ à la
@@ -198,7 +220,7 @@ def _is_forbidden_path(url_path):
     return False
 
 
-def _make_handler_class(app_dir, verbose):
+def _make_handler_class(app_dir, verbose, dev_log=False):
     """Construit une classe de handler HTTP dédiée à app_dir, pour pouvoir
     passer `directory=` à SimpleHTTPRequestHandler tout en gardant un
     indicateur verbose par serveur (et non global au module)."""
@@ -224,13 +246,41 @@ def _make_handler_class(app_dir, verbose):
                 return True
             return False
 
+        def _serve_devlog_if_requested(self, with_body):
+            """Sert qml/js/DevLog.js avec le drapeau activé. Renvoie True
+            si la requête a été traitée ici."""
+            if not dev_log:
+                return False
+            url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+            if posixpath.normpath(url_path) != DEVLOG_URL_PATH:
+                return False
+            local = os.path.join(app_dir, *DEVLOG_URL_PATH.strip("/").split("/"))
+            try:
+                with open(local, "rb") as fh:
+                    body = enable_devlog_source(fh.read())
+            except (OSError, FbxRunError):
+                # Fichier absent ou drapeau introuvable : on sert le fichier
+                # tel quel (journal inactif) plutôt que de casser le lancement.
+                return False
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if with_body:
+                self.wfile.write(body)
+            return True
+
         def do_GET(self):
             if self._refuse_if_forbidden():
+                return
+            if self._serve_devlog_if_requested(True):
                 return
             super().do_GET()
 
         def do_HEAD(self):
             if self._refuse_if_forbidden():
+                return
+            if self._serve_devlog_if_requested(False):
                 return
             super().do_HEAD()
 
@@ -240,8 +290,8 @@ def _make_handler_class(app_dir, verbose):
 class AppServer:
     """Serveur HTTP threadé servant app_dir, lié à (bind_addr, port)."""
 
-    def __init__(self, bind_addr, port, app_dir, verbose=False):
-        handler = _make_handler_class(app_dir, verbose)
+    def __init__(self, bind_addr, port, app_dir, verbose=False, dev_log=False):
+        handler = _make_handler_class(app_dir, verbose, dev_log)
         self.httpd = http.server.ThreadingHTTPServer((bind_addr, port), handler)
         self.bind_addr = bind_addr
         self.port = port
@@ -515,6 +565,14 @@ def build_arg_parser():
              "(défaut : 10).",
     )
     parser.add_argument(
+        "--no-dev-log", action="store_true",
+        help="Ne pas activer le journal de debug de l'application "
+             "(qml/js/DevLog.js). Par défaut ce script sert ce fichier avec "
+             "son drapeau ENABLED basculé sur true, ce qui fait apparaître "
+             "les traces [RDF] ; avec cette option l'application se comporte "
+             "exactement comme le paquet public.",
+    )
+    parser.add_argument(
         "--player-port", type=int, default=80, metavar="PORT",
         help="Port HTTP du Player pour /pub/devel et pour la détection de "
              "l'adresse locale (80 sur un vrai Player ; à modifier "
@@ -569,7 +627,26 @@ def main(argv=None):
         print("Erreur : {}".format(e), file=sys.stderr)
         return 1
 
-    server = AppServer(local_addr, args.port, app_dir, verbose=args.verbose)
+    dev_log = not args.no_dev_log
+    if dev_log:
+        devlog_file = os.path.join(app_dir, *DEVLOG_URL_PATH.strip("/").split("/"))
+        if not os.path.isfile(devlog_file):
+            dev_log = False
+            print("Journal de debug : qml/js/DevLog.js absent, inactif.", flush=True)
+        else:
+            try:
+                with open(devlog_file, "rb") as fh:
+                    enable_devlog_source(fh.read())
+            except (OSError, FbxRunError) as e:
+                print("Erreur : {}".format(e), file=sys.stderr)
+                return 1
+            print("Journal de debug : actif (traces [RDF] ; --no-dev-log pour "
+                  "le désactiver).", flush=True)
+    else:
+        print("Journal de debug : désactivé (--no-dev-log).", flush=True)
+
+    server = AppServer(local_addr, args.port, app_dir, verbose=args.verbose,
+                       dev_log=dev_log)
     try:
         server.start()
     except OSError as e:

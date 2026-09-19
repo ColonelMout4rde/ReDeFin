@@ -289,6 +289,18 @@ else
     echo "Avis : python3 introuvable, vérification des fichiers entryPoints ignorée." >&2
 fi
 
+# --- Garde-fou : le journal de debug doit être inactif dans tout paquet ---
+# qml/js/DevLog.js n'est activé qu'à la volée par tools/fbx-run.py. Un paquet
+# ne doit jamais embarquer le drapeau à true.
+DEVLOG_FILE="${ROOT}/qml/js/DevLog.js"
+if [ -f "${DEVLOG_FILE}" ]; then
+    DEVLOG_OFF_COUNT="$(grep -c '^var ENABLED = false;$' "${DEVLOG_FILE}" || true)"
+    if [ "${DEVLOG_OFF_COUNT}" != "1" ] || grep -q 'var ENABLED = true;' "${DEVLOG_FILE}"; then
+        echo "Erreur : qml/js/DevLog.js doit contenir exactement une ligne 'var ENABLED = false;' et aucune activation." >&2
+        exit 2
+    fi
+fi
+
 # --- Construction reproductible de l'archive ---
 # SOURCE_DATE_EPOCH : on respecte la variable d'environnement si elle est
 # définie (reproductibilité stricte), sinon on prend l'heure courante (et

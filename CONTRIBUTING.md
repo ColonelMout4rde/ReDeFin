@@ -230,10 +230,32 @@ If the Player answers `Failed to load application manifest from network:
 Timeout, check your firewall`, the JSON-RPC call worked but the Player could
 not reach your HTTP server: revisit step 2.
 
-Note that ReDeFin's own logging module (`qml/js/SafeLog.js`) is neutralised
-in the public build, so application-level `console.log` calls are absent by
-design. QML engine errors and the Player's network traces are still
-reported.
+### Application traces (`DevLog`)
+
+ReDeFin's historical logging module (`qml/js/SafeLog.js`) is neutralised in
+the public build. Diagnostic traces go through `qml/js/DevLog.js` instead:
+
+```js
+DevLog.log("T8", "loader ARM reason=" + reason)
+DevLog.log("T5", "url=" + DevLog.maskUrl(url))   // never log a raw URL
+```
+
+`DevLog.ENABLED` is `false` in the repository and in every package, so
+`log()` does nothing for end users. `tools/fbx-run.py` serves that one file
+with the flag switched to `true` on the fly (nothing is written to disk), so
+traces appear **only during a developer-mode run**, as
+`[err] … qml: <file>: [RDF] <tag> <message>`. Pass `--no-dev-log` to run
+exactly like the public package. `build.sh` refuses to package the file if
+the flag is not `false`, and a Node test enforces the same.
+
+Rules: mask every URL with `DevLog.maskUrl()`; every identifier used in a
+message must be in scope (an exception in the playback paths breaks
+playback); in hot paths guard the call with `if (DevLog.ENABLED)` so the
+message is not even built on the Révolution.
+
+QML engine errors and the Player's own network traces are always reported,
+with or without `DevLog`. The Player logs full request URLs, and stream URLs
+carry `ApiKey=`: mask tokens before sharing a log.
 
 ## Coding conventions
 
@@ -242,7 +264,9 @@ reported.
   some of them, but the codebase is uniformly ES5; keep it that way.
 - No `QtQuick.Controls`: the UI is built from `QtQuick` primitives and
   `fbx.ui.base`.
-- No `console.log` in `qml/**`.
+- No direct `console.log` in `qml/**`: use `DevLog.log()` (see
+  [Application traces](#application-traces-devlog)), which is inert outside a
+  developer-mode run.
 - Comments in the application code are written in French, matching the
   existing code. Tests and tooling may use either language; this file and
   commit messages aimed at upstream are in English or French as you prefer.
