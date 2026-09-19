@@ -1105,7 +1105,14 @@ Item {
     }
     property int bgBlur: 8
 
-    property real bgDarken: 0.40; readonly property int  bgCapW: 1280; readonly property int  bgCapH: 720; readonly property int  bgQuality: 80; readonly property real posterScale: 1.35; readonly property int posterQFast: 90
+    // Constat 7 de l'audit accueil : posterScale/posterQFast s'appliquaient à
+    // TOUTES les cartes (20 à 30 visibles), alors que seule la carte
+    // focalisée est zoomée (zoomScale ~1.14) et reçoit de toute façon la
+    // version HD (hqPosterScale 1.60, hqPosterQuality 92) après 320 ms. Les
+    // autres cartes payaient donc 1.35x/q90, soit environ 82 % de pixels en
+    // trop par rapport à leur taille affichée. Resserré à 1.15x/q82 : encore
+    // au-dessus du zoom focal (1.14x), toujours net, moins de décodage.
+    property real bgDarken: 0.40; readonly property int  bgCapW: 1280; readonly property int  bgCapH: 720; readonly property int  bgQuality: 80; readonly property real posterScale: 1.15; readonly property int posterQFast: 82
     readonly property real hqPosterScale: 1.60; readonly property int hqPosterQuality: 92; property string hqPosterTargetId: ""; readonly property string hqPosterCandidateId: { if (!pageActive || isScrollingEff || focusSection < 0 || !_hasAnyHomeListFocus()) return ""; var d = _currentFocusTarget(); return d && d.itemId ? String(d.itemId) : "" }
     Timer { id: hqPosterTimer; interval: 320; repeat: false; onTriggered: { var id = postergrid.hqPosterCandidateId; postergrid.hqPosterTargetId = (id && postergrid.pageActive && !postergrid.isScrollingEff && postergrid._hasAnyHomeListFocus()) ? id : "" } }
     onHqPosterCandidateIdChanged: { hqPosterTargetId = ""; hqPosterTimer.stop(); if (hqPosterCandidateId.length) hqPosterTimer.restart() }
