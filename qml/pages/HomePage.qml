@@ -26,6 +26,7 @@ import QtQuick 2.15
 
 import "../components" as Components
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 
 FocusScope {
     id: homePage
@@ -250,25 +251,37 @@ FocusScope {
                 try { if (!alreadyWarm && !shouldAskFetch && pg._dataEmpty && pg._dataEmpty()) shouldAskFetch = true } catch(e0) {}
                 _lastPosterGridApplyKey = key
 
-                if (alreadyWarm && !shouldAskFetch)
+                // Constat 11 de l'audit accueil : ce « if » sans accolades
+                // capturait le bloc suivant comme corps, ce qui le rend
+                // structurellement mort — alreadyWarm && !shouldAskFetch et
+                // shouldAskFetch ne peuvent jamais être vrais en même temps,
+                // donc le bloc « if (shouldAskFetch) » ci-dessous n'a jamais
+                // été atteint depuis HomePage. beginStaggeredFetch()/
+                // fetchHomeData() ne sont donc appelés QUE par
+                // postergrid.ensureBootFetch() (Component.onCompleted /
+                // onVisibleChanged de postergrid.qml), jamais depuis ici.
+                // Rendu explicite ci-dessous, SANS changer ce comportement
+                // (même code mort, juste visible) : un correctif éventuel de
+                // cette logique est laissé au coordinateur.
+                if (alreadyWarm && !shouldAskFetch) {
+                    if (shouldAskFetch) {
+                        var now = _nowMs()
+                        if (_posterFetchAskKey === key && (now - _posterFetchAskAtMs) < posterFetchAskCooldownMs) {
+                            return
+                        }
+                        if (pg._fetchInFlight === true) {
+                            return
+                        }
 
-                if (shouldAskFetch) {
-                    var now = _nowMs()
-                    if (_posterFetchAskKey === key && (now - _posterFetchAskAtMs) < posterFetchAskCooldownMs) {
-                        return
-                    }
-                    if (pg._fetchInFlight === true) {
-                        return
-                    }
+                        _posterFetchAskKey = key
+                        _posterFetchAskAtMs = now
 
-                    _posterFetchAskKey = key
-                    _posterFetchAskAtMs = now
-
-                    if (pg.beginStaggeredFetch && typeof pg.beginStaggeredFetch === "function") {
-                        pg.beginStaggeredFetch()
-                    } else if (pg.fetchHomeData && typeof pg.fetchHomeData === "function") {
-                        pg.fetchHomeData()
-                    } else {
+                        if (pg.beginStaggeredFetch && typeof pg.beginStaggeredFetch === "function") {
+                            pg.beginStaggeredFetch()
+                        } else if (pg.fetchHomeData && typeof pg.fetchHomeData === "function") {
+                            pg.fetchHomeData()
+                        } else {
+                        }
                     }
                 }
             }
@@ -291,6 +304,9 @@ FocusScope {
        ============================================================ */
     property bool _loading: true
     readonly property bool shellLoading: _loading
+    // Instrumentation HOME1 : horodatage de la création de HomePage (voir
+    // Component.onCompleted plus bas), pour dater le chemin de chargement.
+    property double _t0: 0
     readonly property string shellLoadingError: ""
 
     // Retour de navigation externe vers l'onglet Accueil.
@@ -304,7 +320,14 @@ FocusScope {
     property bool fastHomeReturn: false
 
     property int  minLoadingMs: 900
-    property int  settleMs: 450
+    // Constat 2 de l'audit accueil : cette « stabilisation » attendait
+    // 450 ms sans changement après la dernière donnée avant même de
+    // regarder si le rideau pouvait se lever, ce qui ajoutait une traîne
+    // fixe après la dernière réponse réseau. 120 ms reste largement
+    // suffisant pour absorber une rafale de signaux Qt.callLater/bindings
+    // consécutifs à une même réponse, sans se faire sentir à l'écran.
+    readonly property int homeGateSettleMs: 120
+    property int  settleMs: homeGateSettleMs
     property int  afterFetchedOnceMinMs: 900
     property int  maxLoadingMs: 12000
     // Si le timeout global est atteint, on donne d'abord à PosterGrid une courte
@@ -515,7 +538,7 @@ FocusScope {
                         return
                 }
             } catch(eCache) {}
-            homePage.tryFinishGate()
+            homePage.tryFinishGate("fast-return-fallback")
         })
     }
 
@@ -598,7 +621,7 @@ FocusScope {
         return true;
     }
 
-    function tryFinishGate() {
+    function tryFinishGate(reason) {
         if (!_loading) {
             return;
         }
@@ -607,6 +630,10 @@ FocusScope {
             _waitForHomePosters = false
             _homeVisualReturnPrepared = false
             _loading = false;
+            if (DevLog.ENABLED)
+                DevLog.log("HOME1", "gate release reason=" + (reason || "unspecified")
+                            + " dt=" + (_nowMs() - _loadingStartMs)
+                            + " sinceCreate=" + (_nowMs() - _t0))
             gateMaxTimer.stop();
             gateHardRecoveryTimer.stop();
 
@@ -658,7 +685,7 @@ FocusScope {
                 _preparePosterGridForReveal(reason || "warm-postergrid")
                 if (!gateMaxTimer.running) gateMaxTimer.restart()
                 gateSettleTimer.restart()
-                tryFinishGate()
+                tryFinishGate(reason || "warm-postergrid")
             }
 
             return true
@@ -671,7 +698,7 @@ FocusScope {
         id: gateSettleTimer
         interval: homePage.fastHomeReturn ? homePage.fastReturnSettleMs : homePage.settleMs
         repeat: false
-        onTriggered: homePage.tryFinishGate()
+        onTriggered: homePage.tryFinishGate("settle")
     }
 
     Timer {
@@ -717,6 +744,10 @@ FocusScope {
             homePage._waitForHomePosters = false
             homePage._homeVisualReturnPrepared = false
             homePage._loading = false
+            if (DevLog.ENABLED)
+                DevLog.log("HOME1", "gate release reason=hard-recovery-timeout"
+                            + " dt=" + (homePage._nowMs() - homePage._loadingStartMs)
+                            + " sinceCreate=" + (homePage._nowMs() - homePage._t0))
             homePage._scheduleHomeFocusRelease()
         }
     }
@@ -1581,7 +1612,13 @@ FocusScope {
             homePage.pokeLoadingGate()
         }
         onHomeRevealReadyChanged: {
-            homePage.pokeLoadingGate()
+            // Constat 2 de l'audit accueil : homeRevealReady est le dernier
+            // événement du chemin de chargement. pokeLoadingGate() relançait
+            // ici un plein settleMs (traîne fixe) alors que tryFinishGate()
+            // referme la porte immédiatement si toutes les autres conditions
+            // sont déjà réunies, et se rabat sinon sur le même redémarrage
+            // du minuteur de stabilisation.
+            homePage.tryFinishGate("home-reveal-ready")
             if (posterGridLoader.item
                     && posterGridLoader.item.homeRevealReady === true
                     && !homePage._loading) {
@@ -1787,19 +1824,23 @@ FocusScope {
         pokeLoadingGate()
     }
 
-    Component.onCompleted: Qt.callLater(function () {
-        _hydrateSensitiveContextFromShared()
-        _applyContextToPosterGrid()
+    Component.onCompleted: {
+        _t0 = _nowMs()
+        if (DevLog.ENABLED) DevLog.log("HOME1", "HomePage onCompleted dt=0")
+        Qt.callLater(function () {
+            _hydrateSensitiveContextFromShared()
+            _applyContextToPosterGrid()
 
-        // Nouvelle HomePage après LoginPage : le contenu doit pouvoir recevoir
-        // son focus initial. Le verrou sera ensuite coupé uniquement lorsque
-        // l'utilisateur place explicitement le focus sur les onglets/SearchPage.
-        _keepHomeTabFocused = false
-        _setPosterGridFocusAllowed(true, "homepage-completed")
+            // Nouvelle HomePage après LoginPage : le contenu doit pouvoir recevoir
+            // son focus initial. Le verrou sera ensuite coupé uniquement lorsque
+            // l'utilisateur place explicitement le focus sur les onglets/SearchPage.
+            _keepHomeTabFocused = false
+            _setPosterGridFocusAllowed(true, "homepage-completed")
 
-        beginLoadingGate();
-        pokeLoadingGate();
-    })
+            beginLoadingGate();
+            pokeLoadingGate();
+        })
+    }
 
     Keys.onPressed: {
         if (event.key === Qt.Key_Left || event.key === Qt.Key_Right || event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Select || event.key === Qt.Key_Ok)

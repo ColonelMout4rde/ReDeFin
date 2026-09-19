@@ -19,6 +19,8 @@ import "../js/UserStore.js" as Users
 import "../components" as Components
 import "../js/clientId.js" as ClientId
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
+import "../js/PageCurtainPolicy.js" as PageCurtainPolicy
 
 FocusScope {
     id: shell
@@ -32,6 +34,20 @@ FocusScope {
     property var    fbx
     property bool _pageLoadCurtainHold: false
     property int _pageLoadCurtainSeq: 0
+
+    // Instrumentation NAV1-NAV6 (mesure uniquement, aucun impact hors mode
+    // développeur : DevLog.log() est un no-op tant que DevLog.ENABLED est
+    // false). _navT0 est le repère de la navigation en cours ; chaque trace
+    // suivante rapporte son dt depuis NAV1. Ne jamais journalier autre chose
+    // que le nom de base de la page (jamais la query string ni un identifiant
+    // d'item).
+    property double _navT0: 0
+    onCurrentPageChanged: {
+        if (!currentPage) return
+        shell._navT0 = Date.now()
+        if (DevLog.ENABLED)
+            DevLog.log("NAV1", "request dt=0 page=" + shell._baseOf(currentPage).toLowerCase())
+    }
 
     /* ===================== UPDATE CHECK ===================== */
     // Une seule requête distante par démarrage.
@@ -187,17 +203,23 @@ FocusScope {
     // Loader.Ready signifie seulement que l'objet QML existe. Certaines pages
     // arment leur vrai état de chargement dans le même tour ou juste après
     // (restauration de grille, fetch Jellyfin, backdrop, focus). On garde donc
-    // le curtain jusqu'à ce que l'état "prêt" soit stable plusieurs probes.
+    // le curtain jusqu'à ce que l'état "prêt" soit stable plusieurs probes —
+    // SAUF si la page a explicitement déclaré shellLoading=true puis false :
+    // dans ce cas on sait que son chargement est fini, donc on lève au tout
+    // premier tick (règle F4, audit shell). La décision est déléguée à
+    // qml/js/PageCurtainPolicy.js (module pur, testé dans
+    // tests/js/pagecurtainpolicy.test.js) ; ShellPage ne fait que conserver
+    // l'état entre deux ticks et appliquer le verdict.
     property double _pageCurtainReadySinceMs: 0
-    property int _pageCurtainStableTicks: 0
     readonly property int pageCurtainReadyMinHoldMs: 180
     readonly property int pageCurtainStableTicksRequired: 2
+    property var _pageCurtainPolicyState: PageCurtainPolicy.createState()
 
     function _beginPageCurtainTransition() {
         _pageLoadCurtainSeq = (_pageLoadCurtainSeq + 1) | 0
         _pageLoadCurtainHold = true
         _pageCurtainReadySinceMs = 0
-        _pageCurtainStableTicks = 0
+        _pageCurtainPolicyState = PageCurtainPolicy.createState()
         try { pageCurtainReleaseTimer.stop() } catch(e0) {}
     }
 
@@ -213,7 +235,13 @@ FocusScope {
         if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) return
         if (!(_pageCurtainReadySinceMs > 0))
             _pageCurtainReadySinceMs = Date.now()
-        _pageCurtainStableTicks = 0
+        // Repart avec des ticks stables à zéro (peut être ré-appelé après
+        // Ready, depuis _onPageLoaded), mais garde la mémoire d'une éventuelle
+        // déclaration shellLoading déjà vue depuis _beginPageCurtainTransition.
+        _pageCurtainPolicyState = {
+            sawLoadingTrue: _pageCurtainPolicyState.sawLoadingTrue === true,
+            stableTicks: 0
+        }
         pageCurtainReleaseTimer.curtainSeq = seq
         if (!pageCurtainReleaseTimer.running)
             pageCurtainReleaseTimer.start()
@@ -231,28 +259,38 @@ FocusScope {
                 return
             }
             if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) {
-                shell._pageCurtainStableTicks = 0
                 return
             }
 
-            var elapsed = Date.now() - Number(shell._pageCurtainReadySinceMs || 0)
-            if (elapsed < shell.pageCurtainReadyMinHoldMs)
-                return
+            var verdict = PageCurtainPolicy.evaluate(shell._pageCurtainPolicyState, {
+                pageLoading: shell._pageReportedLoading,
+                elapsedSinceReadyMs: Date.now() - Number(shell._pageCurtainReadySinceMs || 0),
+                minHoldMs: shell.pageCurtainReadyMinHoldMs,
+                stableTicksRequired: shell.pageCurtainStableTicksRequired
+            })
+            shell._pageCurtainPolicyState = verdict.state
 
-            if (shell._pageReportedLoading) {
-                shell._pageCurtainStableTicks = 0
-                return
+            // NAV4 : la page vient de déclarer la fin de SON chargement
+            // (shellLoading vrai puis faux), indépendamment de la levée du
+            // rideau elle-même (NAV5, plus bas, qui suit immédiatement dans
+            // ce cas puisque verdict.release est alors déjà vrai).
+            if (verdict.reason === "declared-done" && DevLog.ENABLED) {
+                DevLog.log("NAV4", "loaded dt=" + (Date.now() - shell._navT0) +
+                           " page=" + shell._baseOf(shell.currentPage).toLowerCase())
             }
 
-            shell._pageCurtainStableTicks++
-            if (shell._pageCurtainStableTicks >= shell.pageCurtainStableTicksRequired) {
-                stop()
-                if (curtainSeq === shell._pageLoadCurtainSeq &&
-                        pageLoader.status === Loader.Ready &&
-                        !shell._pageReportedLoading) {
-                    shell._pageLoadCurtainHold = false
-                    shell._homeLaunchPending = false
-                }
+            if (!verdict.release) return
+
+            stop()
+            if (curtainSeq === shell._pageLoadCurtainSeq &&
+                    pageLoader.status === Loader.Ready &&
+                    !shell._pageReportedLoading) {
+                shell._pageLoadCurtainHold = false
+                shell._homeLaunchPending = false
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
+                               " reason=" + verdict.reason)
             }
         }
     }
@@ -287,14 +325,22 @@ FocusScope {
             try {
                 if (p.restoreFocusAfterShellCurtain
                         && typeof p.restoreFocusAfterShellCurtain === "function") {
-                    if (p.restoreFocusAfterShellCurtain() !== false)
+                    if (p.restoreFocusAfterShellCurtain() !== false) {
+                        if (DevLog.ENABLED)
+                            DevLog.log("NAV6", "focus dt=" + (Date.now() - shell._navT0) +
+                                       " page=" + shell._baseOf(shell.currentPage).toLowerCase())
                         return
+                    }
                 }
             } catch(e0) {}
 
             try {
-                if (p.forceActiveFocus)
+                if (p.forceActiveFocus) {
                     p.forceActiveFocus(Qt.OtherFocusReason)
+                    if (DevLog.ENABLED)
+                        DevLog.log("NAV6", "focus dt=" + (Date.now() - shell._navT0) +
+                                   " page=" + shell._baseOf(shell.currentPage).toLowerCase())
+                }
             } catch(e1) {}
         })
     }
@@ -2039,11 +2085,26 @@ FocusScope {
         }
 
         if (baseNow === "homepage.qml" && shell.saveSettingsRequested) {
-            shell.saveSettingsRequested({
-                serverUrl: shell.sessionServerUrl || "",
-                lastUserId: shell.sessionUserId || "",
-                lastUserName: shell.sessionUserName || ""
-            })
+            // F8 (audit shell) : HomePage se charge à chaque retour à
+            // l'accueil ; sans cette comparaison, les trois mêmes valeurs
+            // étaient renvoyées à chaque fois, ce qui fait réécrire
+            // fbx.application.Settings (E/S synchrone potentielle) même sans
+            // aucun changement réel de session.
+            var nextServerUrl = shell.sessionServerUrl || ""
+            var nextUserId = shell.sessionUserId || ""
+            var nextUserName = shell.sessionUserName || ""
+            var s = shell.settings
+            var changed = !s
+                    || s.serverUrl !== nextServerUrl
+                    || s.lastUserId !== nextUserId
+                    || s.lastUserName !== nextUserName
+            if (changed) {
+                shell.saveSettingsRequested({
+                    serverUrl: nextServerUrl,
+                    lastUserId: nextUserId,
+                    lastUserName: nextUserName
+                })
+            }
         }
     }
 
@@ -2105,14 +2166,24 @@ FocusScope {
         onStatusChanged: {
             if (status === Loader.Loading) {
                 shell._beginPageCurtainTransition()
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV2", "loading dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
             } else if (status === Loader.Error || status === Loader.Null) {
                 shell._pageLoadCurtainSeq = (shell._pageLoadCurtainSeq + 1) | 0
                 shell._pageLoadCurtainHold = false
                 shell._homeLaunchPending = false
                 shell._pageCurtainReadySinceMs = 0
-                shell._pageCurtainStableTicks = 0
+                shell._pageCurtainPolicyState = PageCurtainPolicy.createState()
                 try { pageCurtainReleaseTimer.stop() } catch(e0) {}
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
+                               " reason=loader-error")
             } else if (status === Loader.Ready) {
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV3", "ready dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
                 shell._schedulePageCurtainRelease(shell._pageLoadCurtainSeq)
             }
         }
@@ -2170,6 +2241,11 @@ FocusScope {
             active: pageLoadCurtain.visible && shell._circleDotsRuntimeEnabled
             running: active
             preservePhase: true
+            // F3 (audit shell) : le rideau global tourne pendant l'incubation
+            // asynchrone de la page suivante ; désactiver les Behavior et
+            // ralentir le pas laisse plus de temps CPU à cette incubation sur
+            // un cœur unique (Freebox Révolution).
+            lightweight: true
         }
 
         Text {

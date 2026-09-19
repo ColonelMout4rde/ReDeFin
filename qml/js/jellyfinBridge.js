@@ -2,6 +2,7 @@
 .import "MediaCatalog.js" as MediaCatalog
 .import "SafeLog.js" as SafeLog
 .import "clientId.js" as ClientId
+.import "DevLog.js" as DevLog
 function _s(v){ return (v === undefined || v === null) ? "" : (v + ""); }
 function _safeCode(err, fallback) {
     return SafeLog.safeErrorCode(err, fallback || "network_error");
@@ -35,6 +36,24 @@ function _safeHttpErrorPayload(status) {
     };
 }
 var MAX_HTTP_TEXT_LEN = 262144; var MAX_TEXT_RESPONSE_LEN = 4194304; var DEFAULT_XHR_TIMEOUT_MS = 15000; var DEFAULT_NATIVE_TIMEOUT_MS = 15000;
+// Restriction des types d'images renvoyés par les listes de navigation
+// (audit réseau, point 3) : sans EnableImageTypes, Jellyfin renvoie
+// ImageTags/BackdropImageTags pour TOUS ses types d'image sur chaque item
+// de la liste, même ceux qu'aucun écran ne lit. ImageTypeLimit=1 borne en
+// plus le nombre de tags par type (les cartes n'utilisent jamais que le
+// premier BackdropImageTags[0]). Un type retiré d'ici doit d'abord être
+// vérifié absent de tous les lecteurs de l'écran concerné (grep QML) :
+//  - grilles (moviepage.qml, posterUrlFor) : Primary, Thumb, Backdrop ;
+//  - /Items/Latest et Resume (PosterGridCard.qml, policies "standard" et
+//    "latest-series") : Primary, Thumb, Backdrop ;
+//  - /Shows/NextUp (NextUpBlock.qml + PosterGridCard "nextup-series") :
+//    Primary, Thumb — le Backdrop qui y apparaît vient de ParentBackdrop-
+//    ImageTags/SeriesPrimaryImageTag, des champs Fields= distincts, non
+//    affectés par EnableImageTypes ;
+//  - /Similar (SimilarItems.qml) : Primary seul.
+var IMG_TYPES_NAV_STANDARD = "&EnableImageTypes=Primary,Thumb,Backdrop&ImageTypeLimit=1";
+var IMG_TYPES_NAV_NEXTUP = "&EnableImageTypes=Primary,Thumb&ImageTypeLimit=1";
+var IMG_TYPES_NAV_PRIMARY_ONLY = "&EnableImageTypes=Primary&ImageTypeLimit=1";
 // Budget unique des opérations qui enchaînent plusieurs pages/fallbacks.
 // 14 s reste dans la fenêtre 12–15 s demandée et inclut toutes les sous-requêtes.
 var PAGED_OPERATION_BUDGET_MS = 14000;
@@ -278,10 +297,15 @@ function _safeResponseHeaders(headers) {
     } catch(e0) {}
     return out;
 }
-function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, returnText) {
+// netInfo (facultatif) = { method, url, dtNetwork } fourni par l'appelant
+// transport (_xhrSend / _doHttp) pour la seule trace NET1 : dtNetwork couvre
+// l'envoi jusqu'à la réponse brute, dtParse est mesuré ici autour du parsing.
+function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, returnText, netInfo) {
     var raw = _s(rawText); var maxLen = returnText ? MAX_TEXT_RESPONSE_LEN : MAX_HTTP_TEXT_LEN;
     if (raw.length > maxLen)
         return { tooLarge: true };
+    var __logNet = DevLog.ENABLED && netInfo && _s(netInfo.method || "GET").toUpperCase() === "GET";
+    var __parseStart = __logNet ? _nowMsBridge() : 0;
     var json = null;
     if (!returnText) {
         try {
@@ -289,6 +313,11 @@ function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, r
         } catch(e0) {
             json = _parseJsonBounded(raw);
         }
+    }
+    if (__logNet) {
+        DevLog.log("NET1", "reseau url=" + DevLog.maskUrl(netInfo.url) +
+            " statut=" + (status | 0) + " taille=" + raw.length +
+            " dtReseau=" + (netInfo.dtNetwork | 0) + " dtParse=" + (_nowMsBridge() - __parseStart));
     }
     return {
         tooLarge: false,
@@ -660,8 +689,13 @@ function _apiGetFailCooldownMs(url, err) {
     url = _s(url);
     var c = _errCode(err, "");
     if (url.indexOf("/Items/Latest") < 0) return 0;
+    // 10 min pénalisait une rangée d'accueil bien après qu'une bibliothèque
+    // en panne (5xx passager, redémarrage du serveur...) soit redevenue
+    // saine ; 120 s protège toujours le serveur d'un martèlement en boucle
+    // sans faire disparaître la rangée pour le reste de la session
+    // (audit-reseau.md §2, "Les 10 min sont peut-être excessives").
     if (c === "http_500" || c === "http_502" || c === "http_503" || c === "http_504")
-        return 600000;
+        return 120000;
     if (c === "network_error" || c === "timeout")
         return 60000;
     return 0;
@@ -694,6 +728,16 @@ function _apiGetFlush(key, expectedEntry, ok, payload) {
         })(waiters[i]);
     }
     return true;
+}
+// Taille approximative du corps d'une réponse déjà parsée, pour la seule
+// trace NET1 (DevLog.ENABLED) : jamais calculée en usage normal.
+function _apiApproxBodySize(res) {
+    try {
+        if (!res) return 0;
+        if (typeof res.text === "string" && res.text.length) return res.text.length;
+        if (res.json !== undefined && res.json !== null) return JSON.stringify(res.json).length;
+    } catch (e0) {}
+    return 0;
 }
 function setClientIdentity(info) {
     if (!info || typeof info !== "object") return;
@@ -1003,7 +1047,7 @@ function _safeAltUrlForAuth(url, altHost) {
     return "";
 }
 function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { if (_rejectInsecureTransport(url, headers, body, onError)) { return _completedHttpHandle(); }
-    var xhr = null; var op = null;
+    var xhr = null; var op = null; var __sendStartMs = 0;
     try {
         if (typeof XMLHttpRequest === "undefined")
             throw new Error("XMLHttpRequest indisponible");
@@ -1037,7 +1081,8 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
                     rawTxt,
                     headersObj,
                     function() { return _parseJsonBounded(rawTxt); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __sendStartMs }
                 );
                 if (safe.tooLarge) {
                     op.fail({ code: "too_large", message: "too_large" });
@@ -1057,6 +1102,7 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
         var payload = (body == null)
             ? null
             : (typeof body === "string" ? body : JSON.stringify(body));
+        __sendStartMs = _nowMsBridge();
         xhr.send(payload);
         return op;
     } catch (e3) {
@@ -1069,7 +1115,7 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
     }
 }
 function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if (_rejectInsecureTransport(url, headers, body, onError)) { return _completedHttpHandle(); }
-    var effectiveTimeout = Math.max(100, Number(timeoutMs || DEFAULT_NATIVE_TIMEOUT_MS)); var tx = null; var txOp = null;
+    var effectiveTimeout = Math.max(100, Number(timeoutMs || DEFAULT_NATIVE_TIMEOUT_MS)); var tx = null; var txOp = null; var __netT0 = _nowMsBridge();
     try {
         if (_fbx && _fbx.web && _fbx.web.http && _fbx.web.http.transaction && _fbx.web.http.transaction.factory) {
             tx = _fbx.web.http.transaction.factory(_s(method || "GET").toUpperCase(), url);
@@ -1096,7 +1142,8 @@ function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if
                     rawTxt,
                     resp.headers || {},
                     function() { return resp.jsonParse ? resp.jsonParse() : _parseJsonBounded(rawTxt); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __netT0 }
                 );
                 if (safe.tooLarge) {
                     txOp.fail({ code: "too_large", message: "too_large" });
@@ -1137,7 +1184,8 @@ function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if
                     rawTxt2,
                     res.headers || {},
                     function() { return res.jsonParse ? res.jsonParse() : _parseJsonBounded(rawTxt2); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __netT0 }
                 );
                 if (safe2.tooLarge) {
                     reqOp.fail({ code: "too_large", message: "too_large" });
@@ -1348,14 +1396,25 @@ function sendRequest(method, url, headers, body, onSuccess, onError, _state) { /
         }
         var __ttl = _apiGetTtlMs(__url); var __cached = _apiGetCache[__key];
         if (__cached && __ttl > 0 && (__now - (__cached.ts || 0)) < __ttl) {
+            if (DevLog.ENABLED) {
+                DevLog.log("NET1", "cache url=" + DevLog.maskUrl(__url) +
+                    " statut=" + (__cached.res && __cached.res.status) +
+                    " taille=" + (__cached.size || 0) +
+                    " ageMs=" + (__now - (__cached.ts || 0)) + " ttlMs=" + __ttl);
+            }
             _laterBridge(function() {
                 if (onSuccess) onSuccess(__cached.res);
             });
             return _completedHttpHandle();
         }
         var __existingEntry = _apiGetInflight[__key];
-        if (__existingEntry && !_isArray(__existingEntry))
+        if (__existingEntry && !_isArray(__existingEntry)) {
+            if (DevLog.ENABLED) {
+                DevLog.log("NET1", "dedup url=" + DevLog.maskUrl(__url) +
+                    " attente=" + (_apiInflightActiveWaiterCount(__existingEntry) + 1));
+            }
             return _apiAddInflightWaiter(__key, __existingEntry, onSuccess, onError);
+        }
         // Chaque consommateur, y compris le premier, reçoit son propre handle.
         // Annuler une page ne laisse donc plus une entrée coalescée orpheline.
         var __entry = { waiters: [], leader: null, done: false, epoch: __cacheEpoch };
@@ -1372,7 +1431,8 @@ function sendRequest(method, url, headers, body, onSuccess, onError, _state) { /
                     var storedAt = _nowMsBridge();
                     _apiGetCache[__key] = { ts: storedAt, expiresAt: storedAt + __ttl,
                                             latestParentId: __latestParentId || "",
-                                            userItemId: __userItemId || "", res: res };
+                                            userItemId: __userItemId || "", res: res,
+                                            size: DevLog.ENABLED ? _apiApproxBodySize(res) : 0 };
                     _apiGetTrimCache();
                 }
                 _apiGetFlush(__key, __entry, true, res);
@@ -1965,7 +2025,8 @@ function fetchHomeResumeItems(serverUrl, accessToken, userId, limit, onSuccess, 
         "&EnableTotalRecordCount=false" +
         // ParentId permet à Home de rouvrir une vidéo personnelle dans
         // son dossier PersonalMediaPage sans requête supplémentaire au clic.
-        "&Fields=" + homeMediaFields("BackdropImageTags,Type,CollectionType,ParentId")
+        "&Fields=" + homeMediaFields("BackdropImageTags,Type,CollectionType,ParentId") +
+        IMG_TYPES_NAV_STANDARD
     );
 
     sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
@@ -1985,7 +2046,8 @@ function fetchHomeNextUpItems(serverUrl, accessToken, userId, limit, onSuccess, 
     var path = "/Shows/NextUp?UserId=" + enc(userId) +
         "&Limit=" + enc(safeLimit) +
         "&EnableImages=true&EnableUserData=true&EnableTotalRecordCount=false" +
-        "&Fields=" + homeMediaFields("ParentId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,SeriesPrimaryImageTag");
+        "&Fields=" + homeMediaFields("ParentId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,SeriesPrimaryImageTag") +
+        IMG_TYPES_NAV_NEXTUP;
     if (seriesId) path += "&SeriesId=" + enc(seriesId);
     if (enableResumable === true) path += "&EnableResumable=true";
     var url = _u(serverUrl, path);
@@ -2028,7 +2090,8 @@ function fetchSimilarItems(serverUrl, accessToken, userId, itemId, limit, onSucc
     var url = _u(serverUrl,
         "/Items/" + enc(itemId) + "/Similar?UserId=" + enc(userId) +
         "&Limit=" + enc(limit || 20) +
-        "&Fields=PrimaryImageAspectRatio,CustomRating,ItemCounts,RecursiveItemCount"
+        "&Fields=PrimaryImageAspectRatio,CustomRating,ItemCounts,RecursiveItemCount" +
+        IMG_TYPES_NAV_PRIMARY_ONLY
     );
     return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
         var j = jsonNormalize(res && res.json);
@@ -2061,7 +2124,8 @@ function fetchHomeLatestItemsForParent(serverUrl, accessToken, userId, parentId,
         "&EnableUserData=true" +
         "&Fields=" + homeMediaFields(
             "BackdropImageTags,SeriesPrimaryImageTag,ParentId,Type,CollectionType"
-        )
+        ) +
+        IMG_TYPES_NAV_STANDARD
     );
 
     return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
@@ -2202,7 +2266,8 @@ function _fetchFolderItemsByTypePage(serverUrl, accessToken, userId, folderId, t
                  "&EnableTotalRecordCount=false&SortBy=" + enc(_folderServerSortBy(sortMode)) +
                  "&SortOrder=" + enc(_folderServerSortOrder(sortMode)) +
                  "&StartIndex=" + localStart + "&Limit=" + pageLimit +
-                 "&Fields=" + _folderListFields(typeName);
+                 "&Fields=" + _folderListFields(typeName) +
+                 IMG_TYPES_NAV_STANDARD;
         return _u(serverUrl, query);
     }
     function finish(more, partialCode) {
@@ -2471,6 +2536,36 @@ function fetchUserItem(serverUrl, accessToken, userId, itemId, onSuccess, onErro
     }, failDirect));
     return controller;
 }
+// F6/M2 (audit-grilles.md) : au repos du focus, une grille de bibliothèque
+// n'affiche dans son en-tête que des étiquettes techniques calculées par
+// MediaCatalog.movieStreamInfo() (MediaStreams : résolution, codecs, canaux,
+// langues) et MediaCatalog.movieBrowserTagChips() (Genres en plus des
+// étiquettes précédentes). fetchItem()/fetchUserItem() demandent la fiche
+// COMPLÈTE (/Items/{id} : People, MediaSources, Chapters, Overview...) pour
+// n'en lire que ces deux champs. Cette fonction ne demande que ce qui est
+// réellement lu, sur le même endpoint de liste que fetchMovieFolderItemsPage
+// (poids et forme de réponse déjà éprouvés), en gardant EnableImages=false
+// (aucune image n'est affichée par ce détail) et EnableTotalRecordCount=false
+// (un seul item attendu, le compteur est inutile).
+function fetchUserItemTechSummary(serverUrl, accessToken, userId, itemId, onSuccess, onError) {
+    if (!serverUrl || !accessToken || !userId || !itemId) {
+        onError && onError("missing_params");
+        return null;
+    }
+    var url = _u(serverUrl, "/Items?UserId=" + enc(userId) +
+        "&Ids=" + enc(itemId) +
+        "&Fields=MediaStreams,Genres" +
+        "&EnableImages=false&EnableTotalRecordCount=false");
+    return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
+        var j = jsonNormalize(res && res.json);
+        var items = j && j.Items ? j.Items : [];
+        var item = items && items.length ? items[0] : null;
+        if (item && item.Id) onSuccess && onSuccess(item);
+        else onError && onError("bad_response");
+    }, function(err) {
+        onError && onError(_errCode(err, "network_error"));
+    });
+}
 function fetchUserItemWithPublicFallback(serverUrl, accessToken, userId, itemId, onSuccess, onError) {
     itemId = _s(itemId);
     if (!itemId) {
@@ -2515,6 +2610,7 @@ function fetchRandomEpisode(serverUrl, accessToken, userId, parentId, preferUnpl
             + "&UserId=" + enc(userId)
             + "&ParentId=" + enc(parentId)
             + "&Limit=1&SortBy=Random"
+            + "&EnableTotalRecordCount=false"
             + (unplayed ? "&Filters=IsUnplayed" : "");
         controller._setTransport(sendRequest("get", _u(serverUrl, path), headersWithToken(accessToken), null, function(res) {
             if (controller.cancelled || controller.done) return;
@@ -2538,8 +2634,22 @@ function fetchRandomEpisode(serverUrl, accessToken, userId, parentId, preferUnpl
 // SortName correspond au champ « Titre de tri ». Le nom visible reste uniquement
 // un fallback si le serveur ne renvoie pas SortName. Les égalités sont départagées
 // par Name puis Id afin de conserver un ordre déterministe pendant la pagination.
+// Mémo d'UNE entrée (comme putBoundedMemory le fait ailleurs à plus grande
+// échelle) : une grille rappelle itemImageUrl() 2 à 3 fois par carte avec le
+// même serverUrl, et _normalizeBase() est sinon refait à l'identique à
+// chaque appel. Le serveur ne change pas en cours de session, donc une seule
+// entrée suffit ; un serveur différent invalide simplement le mémo au
+// prochain appel (comparaison stricte de l'entrée brute, avant normalisation).
+var _itemImageUrlBaseCacheIn = undefined;
+var _itemImageUrlBaseCacheOut = "";
+function _itemImageUrlNormalizedBase(serverUrl) {
+    if (serverUrl === _itemImageUrlBaseCacheIn) return _itemImageUrlBaseCacheOut;
+    _itemImageUrlBaseCacheOut = _normalizeBase(serverUrl);
+    _itemImageUrlBaseCacheIn = serverUrl;
+    return _itemImageUrlBaseCacheOut;
+}
 function itemImageUrl(serverUrl, itemId, type, tag, opts) {
-    var u = _normalizeBase(serverUrl);
+    var u = _itemImageUrlNormalizedBase(serverUrl);
     if (!u || !itemId || !type) return "";
     opts = opts || {};
     var q = [];
@@ -2931,21 +3041,42 @@ function fetchSeriesPlayableEpisodeIds(serverUrl, accessToken, userId, seriesId,
 }
 function fetchSeriesAverageEpisodeRuntimeTicks(serverUrl, accessToken, userId, seriesId, fallbackTicks, onSuccess, onError) {
     var fb = MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks);
+    // F4 (audit-fiches.md) : la série connaît déjà sa durée moyenne d'épisode
+    // via RunTimeTicks la plupart du temps. Paginer TOUS ses épisodes
+    // pendant l'ouverture de la fiche rien que pour retomber sur cette même
+    // valeur coûtait un aller-retour réseau et un JSON.parse potentiellement
+    // gros sur le thread GUI du Révolution, pour rien : ce cas répond
+    // maintenant sans requête.
+    if (fb > 0) { onSuccess && onSuccess(fb); return _completedHttpHandle(); }
     if (!serverUrl || !accessToken || !userId || !seriesId) {
-        if (fb > 0) { onSuccess && onSuccess(fb); return _completedHttpHandle(); }
         onError && onError("missing_params");
         return _completedHttpHandle();
     }
-    return _fetchSeriesLightEpisodeItems(serverUrl, accessToken, userId, seriesId, function (items) {
+    // Pas de RunTimeTicks connu : un seul appel borné (Limit=20) suffit à
+    // estimer une moyenne raisonnable, au lieu de paginer toute la série par
+    // pages de 100 (jusqu'à 3000 épisodes) via _fetchSeriesLightEpisodeItems,
+    // qui reste utilisé tel quel par la construction de playlist (elle a
+    // besoin de la liste complète, pas d'une estimation).
+    var url = _u(serverUrl,
+        "/Shows/" + enc(seriesId) +
+        "/Episodes?UserId=" + enc(userId) +
+        "&IsMissing=false" +
+        "&IsVirtualUnaired=false" +
+        "&EnableImages=false&EnableUserData=false" +
+        "&EnableTotalRecordCount=false" +
+        "&SortBy=ParentIndexNumber,IndexNumber" +
+        "&SortOrder=Ascending" +
+        "&Limit=20"
+    );
+    return sendRequest("get", url, headersWithToken(accessToken), null, function (res) {
+        var items = _itemsArrayFromResponse(res && res.json);
         var eps = [];
         for (var i = 0; items && i < items.length; i++) {
-            var ep = items[i];
-            if (MediaCatalog.episodeIsPlayableForPlaylist(ep)) eps.push(ep);
+            if (MediaCatalog.episodeIsPlayableForPlaylist(items[i])) eps.push(items[i]);
         }
         onSuccess && onSuccess(MediaCatalog.averageEpisodeRuntimeTicks(eps, fb));
     }, function (err) {
-        if (fb > 0) { onSuccess && onSuccess(fb); return; }
-        onError && onError(err || "network_error");
+        onError && onError(_errCode(err, "network_error"));
     });
 }
 function buildRandomPlayableSeriesPlaylist(serverUrl, accessToken, userId, seriesId, onSuccess, onError) {

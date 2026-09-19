@@ -1315,39 +1315,57 @@ FocusScope {
                         }
                     }
 
-                    ShaderEffectSource {
-                        id: actorNameTexture
-                        sourceItem: actorNameSourceViewport
-                        hideSource: actorNameViewport.marqueeMoving
-                        live: actorNameViewport.marqueeMoving
-                        recursive: false
-                        visible: false
-                    }
+                    // F10 (audit-grilles.md) : ShaderEffectSource + OpacityMask
+                    // (texture hors écran + masque de fondu) n'ont d'effet que
+                    // PENDANT le marquee d'une carte, mais étaient instanciés pour
+                    // chaque carte d'invité, marquee ou non. Un Loader actif
+                    // seulement sur marqueeOn (vrai uniquement pour la carte
+                    // focalisée dont le nom déborde) évite ce coût pour toutes
+                    // les autres.
+                    Loader {
+                        id: actorNameEffectsLoader
+                        anchors.fill: parent
+                        active: actorNameViewport.marqueeOn
+                        sourceComponent: Component {
+                            Item {
+                                anchors.fill: parent
 
-                    Item {
-                        id: actorNameFadeMask
-                        anchors.fill: actorNameSourceViewport
-                        visible: false
+                                ShaderEffectSource {
+                                    id: actorNameTexture
+                                    sourceItem: actorNameSourceViewport
+                                    hideSource: actorNameViewport.marqueeMoving
+                                    live: actorNameViewport.marqueeMoving
+                                    recursive: false
+                                    visible: false
+                                }
 
-                        Rectangle {
-                            anchors.fill: parent
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.00; color: actorNameViewport.atStart ? "#ff000000" : "#00000000" }
-                                GradientStop { position: 0.10; color: "#ff000000" }
-                                GradientStop { position: 0.90; color: "#ff000000" }
-                                GradientStop { position: 1.00; color: actorNameViewport.atEnd ? "#ff000000" : "#00000000" }
+                                Item {
+                                    id: actorNameFadeMask
+                                    anchors.fill: actorNameSourceViewport
+                                    visible: false
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.00; color: actorNameViewport.atStart ? "#ff000000" : "#00000000" }
+                                            GradientStop { position: 0.10; color: "#ff000000" }
+                                            GradientStop { position: 0.90; color: "#ff000000" }
+                                            GradientStop { position: 1.00; color: actorNameViewport.atEnd ? "#ff000000" : "#00000000" }
+                                        }
+                                    }
+                                }
+
+                                OpacityMask {
+                                    id: actorNameMasked
+                                    anchors.fill: actorNameSourceViewport
+                                    source: actorNameTexture
+                                    maskSource: actorNameFadeMask
+                                    visible: actorNameViewport.marqueeMoving
+                                    cached: false
+                                }
                             }
                         }
-                    }
-
-                    OpacityMask {
-                        id: actorNameMasked
-                        anchors.fill: actorNameSourceViewport
-                        source: actorNameTexture
-                        maskSource: actorNameFadeMask
-                        visible: actorNameViewport.marqueeMoving
-                        cached: false
                     }
 
                     SequentialAnimation {
@@ -1421,39 +1439,53 @@ FocusScope {
                         }
                     }
 
-                    ShaderEffectSource {
-                        id: characterNameTexture
-                        sourceItem: characterNameSourceViewport
-                        hideSource: characterNameViewport.marqueeMoving
-                        live: characterNameViewport.marqueeMoving
-                        recursive: false
-                        visible: false
-                    }
+                    // F10 (audit-grilles.md) : même correctif que actorNameViewport
+                    // ci-dessus (ShaderEffectSource + OpacityMask derrière un Loader
+                    // actif seulement sur marqueeOn).
+                    Loader {
+                        id: characterNameEffectsLoader
+                        anchors.fill: parent
+                        active: characterNameViewport.marqueeOn
+                        sourceComponent: Component {
+                            Item {
+                                anchors.fill: parent
 
-                    Item {
-                        id: characterNameFadeMask
-                        anchors.fill: characterNameSourceViewport
-                        visible: false
+                                ShaderEffectSource {
+                                    id: characterNameTexture
+                                    sourceItem: characterNameSourceViewport
+                                    hideSource: characterNameViewport.marqueeMoving
+                                    live: characterNameViewport.marqueeMoving
+                                    recursive: false
+                                    visible: false
+                                }
 
-                        Rectangle {
-                            anchors.fill: parent
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.00; color: characterNameViewport.atStart ? "#ff000000" : "#00000000" }
-                                GradientStop { position: 0.10; color: "#ff000000" }
-                                GradientStop { position: 0.90; color: "#ff000000" }
-                                GradientStop { position: 1.00; color: characterNameViewport.atEnd ? "#ff000000" : "#00000000" }
+                                Item {
+                                    id: characterNameFadeMask
+                                    anchors.fill: characterNameSourceViewport
+                                    visible: false
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.00; color: characterNameViewport.atStart ? "#ff000000" : "#00000000" }
+                                            GradientStop { position: 0.10; color: "#ff000000" }
+                                            GradientStop { position: 0.90; color: "#ff000000" }
+                                            GradientStop { position: 1.00; color: characterNameViewport.atEnd ? "#ff000000" : "#00000000" }
+                                        }
+                                    }
+                                }
+
+                                OpacityMask {
+                                    id: characterNameMasked
+                                    anchors.fill: characterNameSourceViewport
+                                    source: characterNameTexture
+                                    maskSource: characterNameFadeMask
+                                    visible: characterNameViewport.marqueeMoving
+                                    cached: false
+                                }
                             }
                         }
-                    }
-
-                    OpacityMask {
-                        id: characterNameMasked
-                        anchors.fill: characterNameSourceViewport
-                        source: characterNameTexture
-                        maskSource: characterNameFadeMask
-                        visible: characterNameViewport.marqueeMoving
-                        cached: false
                     }
 
                     SequentialAnimation {

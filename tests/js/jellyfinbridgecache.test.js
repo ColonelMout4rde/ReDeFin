@@ -345,7 +345,10 @@ test('evictLatestParentApiCache : invalide la rangée « Derniers ajouts » d\'u
 /* Cooldowns d'échec                                                   */
 /* ------------------------------------------------------------------ */
 
-test('cooldown : un 5xx sur « Derniers ajouts » met la bibliothèque au repos 10 min', () => {
+test('cooldown : un 5xx sur « Derniers ajouts » met la bibliothèque au repos 120 s', () => {
+    // Réduit de 10 min à 120 s (audit-reseau.md §2) : la rangée d'accueil ne
+    // doit pas rester en panne bien après qu'une bibliothèque redevienne
+    // saine, tout en protégeant le serveur d'un martèlement en boucle.
     const h = createBridge();
     const derniers = (r) =>
         h.bridge.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10, r.onSuccess, r.onError);
@@ -361,10 +364,15 @@ test('cooldown : un 5xx sur « Derniers ajouts » met la bibliothèque au repos 
     assert.equal(h.sentCount(), 1, 'aucune nouvelle requête pendant le cooldown');
     assert.deepEqual(pendant.ko, ['http_500']);
 
-    h.advance(600001);
+    h.advance(119000);
     derniers(recorder());
     h.flush();
-    assert.equal(h.sentCount(), 2, 'le cooldown expire');
+    assert.equal(h.sentCount(), 1, 'toujours au repos juste avant 120 s');
+
+    h.advance(2000);
+    derniers(recorder());
+    h.flush();
+    assert.equal(h.sentCount(), 2, 'le cooldown expire à 120 s');
 });
 
 test('cooldown : une panne réseau ne met au repos qu\'une minute', () => {

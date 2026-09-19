@@ -9,7 +9,15 @@ Item {
     property var host: null
     property int fadeMs: 180
     property int debounceMs: 80
-    property real targetOpacity: 0.90
+    // Constat 6 de l'audit accueil : l'image de fond était affichée à 0,90
+    // puis recouverte d'un Rectangle noir à 0,40 (voir plus bas), soit deux
+    // fusions alpha successives sur 2 Mpx à chaque image animée. Sur fond
+    // noir, superposer une opacité a puis assombrir avec un second calque
+    // noir d'opacité d équivaut exactement à une seule image à l'opacité
+    // a*(1-d) : ici 0,90 * (1 - 0,40) = 0,54. Le Rectangle noir séparé a été
+    // supprimé (voir plus bas) : un seul calque, même rendu, moitié moins de
+    // mélange alpha plein écran.
+    property real targetOpacity: 0.54
     property string _pendingUrl: ""
     property string _visibleUrl: ""
     property string _loadingUrl: ""
@@ -240,19 +248,6 @@ Item {
         onStatusChanged: {
             if (status === Image.Ready) backdropLayer._promoteB()
             else if (status === Image.Error) backdropLayer._failLoading(source)
-        }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        color: "#000"
-        readonly property real darken: backdropLayer.host
-                                       ? Math.max(0.0, Math.min(1.0, backdropLayer.host.bgDarken))
-                                       : 0.0
-        opacity: (backdropLayer._visibleUrl !== "") ? darken : 0.0
-        Behavior on opacity {
-            enabled: !!backdropLayer.host && backdropLayer.host.allowAnims
-            NumberAnimation { duration: backdropLayer.fadeMs; easing.type: Easing.OutCubic }
         }
     }
 

@@ -279,6 +279,26 @@ Règles de ces tests :
 - **Prouver qu'un test peut échouer** : injecter la régression dans une copie
   du module hors dépôt, pointer le chargeur dessus, constater l'échec.
 
+## Tests de la navigation fluide
+
+Les correctifs de performance de la navigation (rapports dans
+`docs/audit-navigation/`) touchent des pages QML de 2 800 lignes qui ne
+s'instancient pas toutes hors Player. Ils sont testés à trois niveaux, du plus
+solide au plus faible :
+
+| Niveau | Fichiers | Ce qui est vérifié |
+| --- | --- | --- |
+| Décision pure | `pagecurtainpolicy`, `gridrevealpolicy`, `detailgatepolicy`, `postersizing` | les modules `qml/js/PageCurtainPolicy.js`, `GridRevealPolicy.js`, `DetailGatePolicy.js`, `PosterSizing.js` : quand lever un rideau, quelle taille d'image demander |
+| Pont HTTP | `jellyfinbridgenet`, `jellyfinbridgenavimages`, `jellyfinbridgeitemtechsummary`, `jellyfinbridgerandomepisode`, `fichebridgeaverageduration` (+ `jellyfinbridgeurl`, `jellyfinbridgecache` étendus) | URL produites et valeurs renvoyées, via `bridgeharness.js` |
+| Composant réel | `tst_postercardtitlelayer`, `tst_libraryposterbadgeloaders`, `tst_homebackdrop`, `tst_chapterscarousel`, `tst_components` | `Loader` à la demande, couche de fond unique, chapitres reçus en propriété, loader allégé, avatar redimensionné |
+| Contrat sur le source | `moviepage*`, `fiche*`, `home*`, `latest*`, `posterscalequality`, `searchpagetotalrecordcount`, `guestpagemarqueeeffectsloader`, `mainsettingsguard`, `shellnavtrace`, `deadfetchguard` | une valeur ou un câblage déclaratif dans une page non instanciable (ex. « `moviepage` déclare `highlightFollowsCurrentItem: false` ») |
+
+Un test de contrat sur le source ne prouve pas un comportement : il empêche
+qu'un import upstream ou une retouche annule silencieusement le correctif. S'il
+devient rouge après un import, relire le constat d'audit cité dans le test
+avant de l'adapter. Préférer un test de décision pure dès que la logique peut
+sortir de la page.
+
 ## Limite connue
 
 Le lint (`qmllint`) et les tests Qt Quick Test tournent sous **Qt 6**

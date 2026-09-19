@@ -28,8 +28,19 @@ Item {
     property bool running: true
     property bool preservePhase: false
 
+    // Constat F3 de l'audit shell : le rideau global tourne en continu (pas
+    // de 64 ms + douze Behavior de 140 ms sur l'opacité) pendant l'incubation
+    // asynchrone de la page suivante, ce qui laisse moins de temps CPU à
+    // cette incubation sur la Freebox Révolution (un seul cœur). lightweight
+    // coupe les Behavior (transition sèche, sans fondu) et ralentit le pas à
+    // ~110 ms. Par défaut à false pour ne rien changer aux loaders locaux
+    // existants (boutons, petites attentes) ; ShellPage l'active uniquement
+    // sur le rideau global de page.
+    property bool lightweight: false
+
     // Anti-timer zombie quand dotCount/cycleDuration changent
     function _recomputeInterval() {
+        if (lightweight) return 110;
         return Math.max(40, Math.floor(cycleDuration / Math.max(1, dotCount + 2)));
     }
 
@@ -39,6 +50,11 @@ Item {
         running: root.visible && root.enabled && root.active && root.running
         repeat: true
         onTriggered: root.litCount = (root.litCount + 1) % (root.dotCount + 1)
+    }
+
+    onLightweightChanged: {
+        stepTimer.interval = _recomputeInterval()
+        if (stepTimer.running) stepTimer.restart()
     }
 
     // Reset propre si on réactive / si on change la géométrie
@@ -103,6 +119,7 @@ Item {
                 antialiasing: false
 
                 Behavior on opacity {
+                    enabled: !root.lightweight
                     NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
                 }
             }

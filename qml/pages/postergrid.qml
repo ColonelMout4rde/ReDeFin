@@ -2,6 +2,7 @@ import QtQuick 2.15
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 Item {
     id: postergrid
     objectName: "postergrid"
@@ -46,7 +47,13 @@ Item {
 
     property bool _homeRevealReady: false
     property bool _homeRevealPrepareActive: false
-    property int homeRevealSettleMs: 240
+    // Constat 2 de l'audit accueil : ce délai, ajouté à celui de HomePage
+    // (homeGateSettleMs) et au relance-450ms d'onHomeRevealReadyChanged
+    // (supprimé), formait l'essentiel de la traîne fixe après la dernière
+    // réponse réseau. 80 ms suffit à laisser le focus/scroll se stabiliser
+    // avant d'annoncer le reveal prêt.
+    readonly property int homeRevealSettleDefaultMs: 80
+    property int homeRevealSettleMs: homeRevealSettleDefaultMs
     readonly property bool homeRevealReady: _homeRevealReady
                                              && !_restoringFocus
                                              && !_focusRestorePending
@@ -66,6 +73,10 @@ Item {
     property bool ready: false
     property bool _syncFolderIndex: false
     property bool _alive: false
+    // Instrumentation HOME1 : horodatage de la création de postergrid, pour
+    // dater tous les événements du chargement de l'accueil (dt en ms depuis
+    // Component.onCompleted). Voir CLAUDE.md « Debugging on device ».
+    property double _t0: 0
     property int _fetchSeq: 0
     property int _nextUpSeq: 0
     property bool _syncNextUpIndex: false
@@ -95,7 +106,13 @@ Item {
         // D-Pad / souris : seul ce chemin anime horizontalement le rail.
         try { if (folderList.ensureIndexVisible) folderList.ensureIndexVisible(want, true) } catch(e0) {}
         updateBackdrop()
-        if (focusSection === 0 && !_restoringFocus && !_focusRestorePending && !_focusRestoreSettle) saveFocusSnapshot(reason || "folderIndex")
+        // Constat 9 de l'audit accueil : « currentFolderIndex = want » ci-dessus
+        // déclenche déjà onCurrentFolderIndexChanged, qui appelle
+        // saveFocusSnapshot("folderIndex") de façon synchrone avec le même
+        // contexte (focusSection, drapeaux de restauration inchangés entre les
+        // deux). Cet appel explicite était donc redondant à chaque appui dans
+        // « Mes médias » ; supprimé, le paramètre reason n'étant de toute
+        // façon pas utilisé par saveFocusSnapshot().
         Qt.callLater(function(){ _folderUserNavActive = false })
     }
     function _syncFolderListFromSaved() {
@@ -670,6 +687,13 @@ Item {
     property bool _bootFetchPending: false; property string _bootFetchKey: ""; property bool _fetchInFlight: false; property string _activeFetchKey: ""
     property double _lastFetchStartMs: 0; property double _lastHomeCacheWriteMs: 0; property bool _homeImagesReady: false; property bool _homeImageReturnFreeze: false
     property bool _homePosterVisualReady: false; readonly property bool homePosterVisualReady: _homePosterVisualReady; property int homePosterProbeMs: 45; property int homePosterReadySettleMs: 90
+    // Constat 4 de l'audit accueil : le rideau de retour attendait que TOUTES
+    // les affiches visibles soient Ready, sans borne, alors qu'elles sont
+    // re-téléchargées (cache:false). Décision produit : au-delà de cette
+    // borne on révèle quand même, les affiches manquantes arrivent ensuite
+    // derrière leur placeholder/fondu existants.
+    readonly property int homePosterVisualReadyMaxWaitMs: 300
+    property double _homePosterVisualReadyDeadlineMs: 0
     property bool suspendVisualTextures: false; property bool homeCurtainVisible: false; property bool _homeCurtainWarmupLatched: false; property int homeImageSettleMs: 240; property int homeImageReturnFreezeMs: 240
     readonly property bool _homeImageLoadGate: !suspendVisualTextures && _homeImagesReady && (homeCurtainVisible || _homeCurtainWarmupLatched || !_homeImageReturnFreeze)
     onSuspendVisualTexturesChanged: {
@@ -689,12 +713,38 @@ Item {
     onHomeCurtainVisibleChanged: {
         if (homeCurtainVisible) {
             _homeCurtainWarmupLatched = true
+            // Constat 4 : arme la borne de 300 ms au moment précis où le
+            // rideau apparaît, seul point d'entrée de _probeHomePosterVisualReady.
+            _homePosterVisualReadyDeadlineMs = Date.now()
             _scheduleHomePosterVisualProbe()
         } else {
             if (!_homeImageReturnFreeze) _homeCurtainWarmupLatched = false
+            _homePosterVisualReadyDeadlineMs = 0
             homePosterProbeTimer.stop()
             homePosterReadySettleTimer.stop()
         }
+    }
+
+    // Instrumentation HOME1 (constat 1 de l'audit accueil) : chaque étape du
+    // chemin de chargement, avec dt depuis la création de postergrid. Ne
+    // trace jamais d'URL ni de jeton, seulement des booléens/durées.
+    onFetchedOnceChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "fetchedOnce=" + fetchedOnce + " dt=" + (Date.now() - _t0))
+    }
+    onLibraryFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "libraryFetchCompleted=" + libraryFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onResumeFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "resumeFetchCompleted=" + resumeFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onNextUpFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "nextUpFetchCompleted=" + nextUpFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onLatestFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "latestFetchCompleted=" + latestFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onHomeRevealReadyChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "homeRevealReady=" + homeRevealReady + " dt=" + (Date.now() - _t0))
     }
 
     readonly property int homeCacheFreshMs: 180000; readonly property int visibleRefetchMinAgeMs: 180000
@@ -778,6 +828,20 @@ Item {
     function _scheduleHomePosterVisualProbe(){ if (_alive && homeCurtainVisible && !homePosterProbeTimer.running) homePosterProbeTimer.restart() }
     function _probeHomePosterVisualReady() {
         if (!_alive || !homeCurtainVisible) return
+        if (_homePosterVisualReadyDeadlineMs > 0
+                && (Date.now() - _homePosterVisualReadyDeadlineMs) >= homePosterVisualReadyMaxWaitMs) {
+            // Constat 4 : ne plus attendre indéfiniment que toutes les
+            // affiches visibles soient chargées avant de lever le rideau de
+            // retour. Au-delà de la borne, on révèle : le placeholder et le
+            // fondu déjà en place sur chaque carte prennent le relais
+            // pendant que les images arrivent.
+            if (DevLog.ENABLED) DevLog.log("HOME1", "poster-visual-ready timeout dt=" + (Date.now() - _t0))
+            _homePosterVisualReady = true
+            _homePosterVisualReadyDeadlineMs = 0
+            homePosterProbeTimer.stop()
+            homePosterReadySettleTimer.stop()
+            return
+        }
         if (!_hasVisibleHomeData()) {
             _homePosterVisualReady = true
             return
@@ -904,13 +968,15 @@ Item {
                 return false
             }
             var now = Date.now()
-            var cacheKey = _homeCacheKey(); var c = _touchHomeCache(st, cacheKey, now)
+            var cacheKey = _homeCacheKey(); var hadCacheEntry = !!(st[cacheKey]); var c = _touchHomeCache(st, cacheKey, now)
             if (!c) {
+                if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=" + (hadCacheEntry ? "cache-perime" : "cache-absent") + " dt=" + (now - _t0))
                 _trimHomeCacheStore(st, "")
                 return false
             }
             var cacheTs = Number(c.ts || 0)
             if (_lastHomeCacheRestoreKey === cacheKey && _lastHomeCacheRestoreCacheTs === cacheTs && _lastHomeCacheRestoreAtMs > 0 && (now - _lastHomeCacheRestoreAtMs) >= 0 && (now - _lastHomeCacheRestoreAtMs) <= homeCacheRestoreDedupMs && fetchedOnce === true && libraryFetchCompleted === true && resumeFetchCompleted === true && nextUpFetchCompleted === true && latestFetchCompleted === true) {
+                if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=cache-frais-dedup dt=" + (now - _t0))
                 return true
             }
             _trimHomeCacheStore(st, cacheKey)
@@ -942,6 +1008,7 @@ Item {
             _lastHomeCacheRestoreKey = cacheKey
             _lastHomeCacheRestoreCacheTs = cacheTs
             _lastHomeCacheRestoreAtMs = Date.now()
+            if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=cache-frais dt=" + (Date.now() - _t0))
             return true
         } catch(e) {
             return false
@@ -1044,7 +1111,14 @@ Item {
     }
     property int bgBlur: 8
 
-    property real bgDarken: 0.40; readonly property int  bgCapW: 1280; readonly property int  bgCapH: 720; readonly property int  bgQuality: 80; readonly property real posterScale: 1.35; readonly property int posterQFast: 90
+    // Constat 7 de l'audit accueil : posterScale/posterQFast s'appliquaient à
+    // TOUTES les cartes (20 à 30 visibles), alors que seule la carte
+    // focalisée est zoomée (zoomScale ~1.14) et reçoit de toute façon la
+    // version HD (hqPosterScale 1.60, hqPosterQuality 92) après 320 ms. Les
+    // autres cartes payaient donc 1.35x/q90, soit environ 82 % de pixels en
+    // trop par rapport à leur taille affichée. Resserré à 1.15x/q82 : encore
+    // au-dessus du zoom focal (1.14x), toujours net, moins de décodage.
+    property real bgDarken: 0.40; readonly property int  bgCapW: 1280; readonly property int  bgCapH: 720; readonly property int  bgQuality: 80; readonly property real posterScale: 1.15; readonly property int posterQFast: 82
     readonly property real hqPosterScale: 1.60; readonly property int hqPosterQuality: 92; property string hqPosterTargetId: ""; readonly property string hqPosterCandidateId: { if (!pageActive || isScrollingEff || focusSection < 0 || !_hasAnyHomeListFocus()) return ""; var d = _currentFocusTarget(); return d && d.itemId ? String(d.itemId) : "" }
     Timer { id: hqPosterTimer; interval: 320; repeat: false; onTriggered: { var id = postergrid.hqPosterCandidateId; postergrid.hqPosterTargetId = (id && postergrid.pageActive && !postergrid.isScrollingEff && postergrid._hasAnyHomeListFocus()) ? id : "" } }
     onHqPosterCandidateIdChanged: { hqPosterTargetId = ""; hqPosterTimer.stop(); if (hqPosterCandidateId.length) hqPosterTimer.restart() }
@@ -1404,7 +1478,12 @@ Item {
         else if (MediaCatalog.isUnsupportedMediaItem(it)) openUnsupportedFolder(it)
         else playItem(it)
     }
-    readonly property int latestFullLimit: 50; readonly property int latestMaxInflight: 2; readonly property int latestStartDelayMs: 110; readonly property int latestProximityLibraryStep: 3
+    // Constat 2 de l'audit accueil : ce délai retardait chaque lancement de
+    // requête Latest sans raison fonctionnelle (juste un espacement de
+    // courtoisie hérité). 16 ms (~1 frame à 60 Hz) suffit à laisser
+    // latestPumpTimer repasser par la boucle d'événements entre deux
+    // requêtes sans ajouter de traîne perceptible.
+    readonly property int latestFullLimit: 50; readonly property int latestMaxInflight: 2; readonly property int latestStartDelayMs: 16; readonly property int latestProximityLibraryStep: 3
     readonly property int latestInitialRequestTimeoutMs: 6500
     property var _latestLibs: []; property int _latestPos: 0; property int _latestInFlight: 0; property int _latestQueueSeq: 0; property var _latestReloadHandles: ({})
     property var _latestInitialPending: ({})
@@ -1518,9 +1597,22 @@ Item {
         if (!_focusRestorePending && !_restoringFocus) postergrid.currentLatestGroup = MediaCatalog.clampIndex(postergrid.currentLatestGroup, out.length)
     }
     function _rebuildLatestByFolderFromTemp() {
-        postergrid._publishLatestFromTemp()
         postergrid._latestAllComplete = postergrid._latestQueueDone()
         postergrid.latestFetchCompleted = postergrid._latestAllComplete
+        // Constat 1 de l'audit accueil : avant que l'accueil ne soit révélé
+        // une première fois, chaque bibliothèque Latest reçue republiait
+        // latestByFolder, ce qui vide et régénère tout le Repeater
+        // (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6 fois pour
+        // 6 bibliothèques, alors que le rideau attend de toute façon la
+        // dernière. On ne publie donc qu'une fois toutes les réponses
+        // attendues arrivées (_latestAllComplete, y compris via le timeout
+        // existant qui force cet état dans forceHomeBootstrapCompletion).
+        // Une fois l'accueil déjà révélé une première fois (homeRevealReady),
+        // la publication incrémentale habituelle reprend : chargement par
+        // proximité en défilant, rechargement d'une section évincée.
+        if (postergrid._homeRevealReady || postergrid._latestAllComplete) {
+            postergrid._publishLatestFromTemp()
+        }
     }
     function _fetchLatestForFolderId(parentId, limit, groupItems, ok, ko) {
         return Jellyfin.fetchHomeLatestItemsForParent(
@@ -1868,8 +1960,10 @@ Item {
     }
 
     Component.onCompleted: {
+        _t0 = Date.now()
         _alive = true
         ready = true
+        if (DevLog.ENABLED) DevLog.log("HOME1", "postergrid onCompleted dt=0")
         ensureBootFetch()
         scheduleBackdropFocusRefresh()
     }
@@ -2087,6 +2181,19 @@ Item {
         })
     }
     property real _lastScrollY: 0; signal scrolled(real y, int direction); readonly property real latestEvictScreens: 2.2; readonly property int latestDataEvictDelayMs: 4200
+    // Constat 10 de l'audit accueil : au-delà de latestEvictScreens (2,2
+    // écrans), _evictFarLatestData() vidait purement et simplement
+    // entry.items (les données JSON, ~50 Ko par section), EN PLUS de
+    // l'éviction déjà faite au niveau délégué/texture par
+    // _evictLatestSections() (sec.evicted, qui vide déjà latestList.model
+    // via sectionModelActive). Remonter faisait alors réafficher
+    // « Rechargement… » et repartir une requête réseau pour un gain mémoire
+    // que l'audit estime négligeable (le gain réel vient des délégués et
+    // des textures, déjà évincés séparément par le mécanisme léger).
+    // Drapeau nommé pour un retour arrière en une ligne si une régression
+    // mémoire est mesurée sur boîtier : latestDataEvictTimer reste armé
+    // (aucun changement de câblage), seul son effet est neutralisé.
+    readonly property bool latestDataEvictionEnabled: false
     Timer { id: latestEvictTimer; interval: 650; repeat: false; running: false; onTriggered: postergrid._evictLatestSections() }
     Timer { id: latestDataEvictTimer; interval: postergrid.latestDataEvictDelayMs; repeat: false; running: false; onTriggered: postergrid._evictFarLatestData() }
     Timer {
@@ -2114,6 +2221,7 @@ Item {
         }
     }
     function _evictFarLatestData() {
+        if (!postergrid.latestDataEvictionEnabled) return
         if (!latestRepeater || !sections || !_vFlick || !pageActive || !latestByFolder) return
         var viewTop = _vFlick.contentY; var viewBot = viewTop + _vFlick.height; var farPad = height * latestEvictScreens; var next = latestByFolder.slice(0); var changed = false
         for (var i = 0; i < next.length; ++i) {

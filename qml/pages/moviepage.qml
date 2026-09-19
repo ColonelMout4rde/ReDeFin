@@ -11,6 +11,8 @@ import "." as Pages
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/UserStore.js" as UserStore
+import "../js/DevLog.js" as DevLog
+import "../js/GridRevealPolicy.js" as GridReveal
 Item {
     id: moviepage
     width: parent ? parent.width : 1920
@@ -84,8 +86,11 @@ Item {
     property int  folderRestoreVisualTargetIndex: -1
     property int  folderRestoreRevealAttempts: 0
     property real folderRestoreStableSinceMs: 0
-    readonly property int folderRestoreVisualSettleMs: 1100
-    readonly property int folderRestoreRevealMaxAttempts: 80
+    // Valeurs de la politique pure GridRevealPolicy.js : ne plus attendre le
+    // décodage de l'affiche focalisée, seulement une courte stabilité de mise
+    // en page (décision produit, voir le brief « navigation fluide »).
+    readonly property int folderRestoreVisualSettleMs: GridReveal.SETTLE_MS
+    readonly property int folderRestoreRevealMaxAttempts: GridReveal.MAX_ATTEMPTS
     readonly property bool folderBlockingLoading: folderInitialLoading || folderRestoreVisualLoading
     // Le Shell garde son curtain pendant tout le premier cycle de fetch.
     // Cela couvre aussi la courte fenêtre où la restauration de grille n'a pas
@@ -154,6 +159,17 @@ Item {
 
     readonly property int  gridCellW: posterW + focusPad * 2
     readonly property int  gridCellH: posterH + focusPad + topPadFor(posterH)
+
+    // Marge de pré-création/pré-chargement de la GridView (F5, audit-grilles.md) :
+    // une rangée entière plutôt que 0,42 × la hauteur de la vue (~245 px, soit
+    // moins qu'une cellule d'environ 293 px). Avec l'ancienne valeur, la
+    // rangée suivante était créée PENDANT le glissement (7 délégués + 7
+    // images d'un coup) au lieu d'être prête à l'arrêt. Compromis mémoire
+    // assumé : une rangée de délégués/images supplémentaire reste toujours en
+    // dehors du viewport (RAM Révolution limitée) ; à revoir avec une mesure
+    // sur boîtier si la pagination par fenêtre glissante (folderWindowMaxItems)
+    // s'en trouve mise sous pression.
+    readonly property int  gridCacheBufferPx: gridCellH
 
     // ✅ TWEAK 2: qualité JPEG abaissée (URL unique)
     readonly property int jpgQltPosters: 82
@@ -479,16 +495,6 @@ Item {
         else _scheduleSelectedItemDetailFetch()
     }
 
-    /* ========= Utils visibilité ========= */
-    function indexVisible(idx) {
-        var cols = (grid && grid.columns > 0) ? grid.columns : 1
-        var row = Math.floor(idx / cols)
-        var rowTop = row * grid.cellHeight
-        var rowBottom = rowTop + grid.cellHeight
-        var margin = Math.max(360, grid.cellHeight * 1.5)
-        return !(rowBottom < (grid.contentY - margin) || rowTop > (grid.contentY + grid.height + margin))
-    }
-
     /* ========= Focus target ========= */
     function forceInitialFocus() {
         // Ne jamais exposer/focaliser provisoirement l'index 0 pendant une
@@ -616,7 +622,15 @@ Item {
         var result = MediaCatalog.browserSortedWindow(
                     _rawFolderItems || [], sortMode, serverSortedPage === true,
                     keepId, grid ? grid.currentIndex : -1, resetFirst)
+        var gridT0 = Date.now()
         folderItems = result.items || []
+        if (DevLog.ENABLED) {
+            var gridItemCount = folderItems.length
+            Qt.callLater(function() {
+                DevLog.log("GRID4", "folderItems affecté count=" + gridItemCount +
+                                    " dt=" + (Date.now() - gridT0))
+            })
+        }
 
         if (result.index >= 0) {
             grid.currentIndex = result.index
@@ -860,7 +874,9 @@ Item {
         try { restoreRevealTimer.stop() } catch(e) {}
     }
 
-    function _releaseFolderRestoreVisualLoading() {
+    function _releaseFolderRestoreVisualLoading(reason) {
+        DevLog.log("GRID6", "rideau levé raison=" + (reason || "inconnue") +
+                            " attempts=" + folderRestoreRevealAttempts)
         try { restoreRevealTimer.stop() } catch(e) {}
         folderRestoreVisualLoading = false
         folderRestoreVisualTargetIndex = -1
@@ -876,40 +892,29 @@ Item {
         repeat: true
         running: false
         onTriggered: {
-            folderRestoreRevealAttempts++
             var target = folderRestoreVisualTargetIndex
             var delegateReady = !!(grid && target >= 0 && grid.count > target
                                       && grid.currentIndex === target && grid.currentItem)
-            var posterReady = delegateReady
-                              && (typeof grid.currentItem.posterVisualReady === "undefined"
-                                  || grid.currentItem.posterVisualReady === true)
-            var gridStable = delegateReady
-                             && !folderPageInFlight
-                             && !loadingItems
-                             && !grid.moving
-                             && !grid.dragging
-                             && !grid.flicking
-                             && !(glideY && glideY.running)
-            var visuallyReady = posterReady && gridStable
+            // Ne dépend plus du décodage de l'affiche focalisée
+            // (posterVisualReady) : seule compte la mise en page (délégué posé,
+            // grille immobile). Voir GridRevealPolicy.js pour la décision produit.
+            var gridMoving = delegateReady && (folderPageInFlight
+                             || loadingItems
+                             || grid.moving
+                             || grid.dragging
+                             || grid.flicking
+                             || (glideY && glideY.running))
             var now = Date.now ? Date.now() : (new Date()).getTime()
 
-            // Le loader reste devant la grille tant que le poster focalisé n'est
-            // pas prêt et que la scène n'est pas restée stable pendant 1,1 s.
-            // Cette marge absorbe les petits flashs des posters voisins lors de
-            // leur création/décodage après une restauration au-delà de 220 items.
-            if (visuallyReady) {
-                if (folderRestoreStableSinceMs <= 0) folderRestoreStableSinceMs = now
-                if ((now - folderRestoreStableSinceMs) >= folderRestoreVisualSettleMs) {
-                    _releaseFolderRestoreVisualLoading()
-                    return
-                }
-            } else {
-                folderRestoreStableSinceMs = 0
-            }
-
-            // Garde-fou de 4,8 s maximum après positionnement final.
-            if (folderRestoreRevealAttempts >= folderRestoreRevealMaxAttempts)
-                _releaseFolderRestoreVisualLoading()
+            var result = GridReveal.tick({
+                delegateReady: delegateReady,
+                gridMoving: gridMoving,
+                stableSinceMs: folderRestoreStableSinceMs,
+                attempts: folderRestoreRevealAttempts
+            }, now)
+            folderRestoreStableSinceMs = result.stableSinceMs
+            folderRestoreRevealAttempts = result.attempts
+            if (result.release) _releaseFolderRestoreVisualLoading(result.reason)
         }
     }
 
@@ -927,7 +932,7 @@ Item {
                 return
             }
             _scheduleBackdropUpdate(false)
-            _releaseFolderRestoreVisualLoading()
+            _releaseFolderRestoreVisualLoading("empty-no-more")
             return
         }
 
@@ -971,6 +976,8 @@ Item {
         }
 
         folderRestoreVisualTargetIndex = grid.currentIndex
+        DevLog.log("GRID5", "restore index appliqué target=" + idx +
+                            " currentIndex=" + grid.currentIndex)
         restoreIndex = -1
         startIndex   = -1
         restoreY     = -1
@@ -1090,6 +1097,10 @@ Item {
                 fetchedOnce = true
 
                 var arr = (page && page.items) ? page.items : []
+                // Le payload de page ne porte pas la taille JSON brute (non
+                // disponible à cette couche) : seul le nombre d'items est journalisé.
+                DevLog.log("GRID3", "réponse items=" + arr.length + " start=" + start +
+                                    " prepend=" + !!prepend + " hasMore=" + !!(page && page.hasMore))
                 _appendWindowFolderItems(arr, start, prepend)
                 _refreshLibraryMediaMode()
 
@@ -1315,7 +1326,7 @@ Item {
     }
 
     function _fetchSelectedItemDetailForTags() {
-        if (!ready || loadingItems || !accessToken || !serverUrl) return
+        if (!ready || loadingItems || !accessToken || !serverUrl || !userId) return
         if (isGridInMotion) { selectedDetailFetchTimer.restart(); return }
         var it = _baseSelectedItem()
         if (!_itemNeedsMediaDetail(it)) return
@@ -1327,18 +1338,33 @@ Item {
         _detailFetchToken++
         var token = _detailFetchToken
         _detailFetchInFlightId = id
+        var onDetail = function(detail) {
+            if (token !== _detailFetchToken) return
+            _detailFetchHandle = null
+            if (_detailFetchInFlightId === id) _detailFetchInFlightId = ""
+            if (detail && detail.Id)
+                _storeItemDetailForTags(id, detail)
+        }
+        var onDetailError = function() {
+            if (token === _detailFetchToken) _detailFetchHandle = null
+            if (token === _detailFetchToken && _detailFetchInFlightId === id)
+                _detailFetchInFlightId = ""
+        }
         try {
-            _detailFetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, id, function(detail) {
-                if (token !== _detailFetchToken) return
-                _detailFetchHandle = null
-                if (_detailFetchInFlightId === id) _detailFetchInFlightId = ""
-                if (detail && detail.Id)
-                    _storeItemDetailForTags(id, detail)
-            }, function() {
-                if (token === _detailFetchToken) _detailFetchHandle = null
-                if (token === _detailFetchToken && _detailFetchInFlightId === id)
-                    _detailFetchInFlightId = ""
-            })
+            if (personalMode) {
+                // Le header personnel (MediaCatalog.personalMediaStreamInfo)
+                // lit aussi Width/Height/Container/Bitrate (dimensions photo) :
+                // hors du périmètre du résumé technique ci-dessous, on garde
+                // la fiche complète pour ce mode.
+                _detailFetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, id, onDetail, onDetailError)
+            } else {
+                // F6/M2 (audit-grilles.md) : l'en-tête films/séries n'affiche
+                // que des étiquettes techniques (MediaCatalog.movieStreamInfo
+                // lit MediaStreams, movieBrowserTagChips lit aussi Genres),
+                // pas la fiche complète (People, MediaSources, Chapters...)
+                // que fetchItem() demandait pour cet usage.
+                _detailFetchHandle = Jellyfin.fetchUserItemTechSummary(serverUrl, accessToken, userId, id, onDetail, onDetailError)
+            }
         } catch(e) {
             _detailFetchInFlightId = ""
         }
@@ -1362,6 +1388,8 @@ Item {
         _hydrateSensitiveContextFromShared()
         if (!accessToken || !userId || !serverUrl || !folderId) return
 
+        DevLog.log("GRID2", "fetchFolder départ mode=" + normalizedLibraryMode +
+                            " pageSize=" + folderPageSize)
         _fetchToken++
         _restoreSortFromShared()
         _armFolderRestoreVisualLoading()
@@ -1385,7 +1413,8 @@ Item {
     }
 
     Component.onCompleted: {
-
+        DevLog.log("GRID1", "onCompleted mode=" + normalizedLibraryMode +
+                            " pageSize=" + folderPageSize)
         _hydrateSensitiveContextFromShared()
         ready = true
         scheduleFetchFolder()
@@ -2428,7 +2457,15 @@ Item {
         flow: GridView.FlowLeftToRight
         clip: true
         reuseItems: true
-        cacheBuffer: Math.round(height * 0.42)
+        // La page pilote elle-même contentY (glideY, ensureVisible()) : le
+        // highlight par défaut de GridView (suivi de currentItem en 150 ms)
+        // écrirait contentY une seconde fois à chaque image, en concurrence
+        // avec glideY. Aucun composant highlight personnalisé n'est défini
+        // ici, donc le neutraliser ne change rien à l'affichage (même
+        // stratégie que SearchPage, cf. son ListView de résultats).
+        highlightFollowsCurrentItem: false
+        highlightMoveDuration: 0
+        cacheBuffer: gridCacheBufferPx
         property int columns: Math.max(1, Math.floor(width / cellWidth))
         property int pendingEnsureIndex: -1
         // Empêche un glide interrompu par une nouvelle touche de déclencher les
@@ -2546,7 +2583,14 @@ Item {
             id: movieLibraryDelegate
             width: grid.cellWidth
             height: grid.cellHeight
-            visible: moviepage.indexVisible(index)
+            // L'ancien garde-fou recalculait une marge (contentY, cellHeight)
+            // par délégué ET par image pendant un glissement, alors que sa
+            // marge (≥360 px, voire ≥cellHeight*1,5) dépassait déjà le
+            // cacheBuffer de la GridView : tout délégué instancié par
+            // reuseItems/cacheBuffer était donc déjà considéré visible, et ce
+            // calcul ne faisait plus que payer son propre coût. La vraie
+            // limite de ce qui est créé/chargé reste cacheBuffer.
+            visible: true
             z: selected ? 1000 : 0
 
             property var itemData: modelData

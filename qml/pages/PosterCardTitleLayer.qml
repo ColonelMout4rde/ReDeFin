@@ -255,61 +255,77 @@ Item {
             }
         }
 
-        OpacityMask {
-            id: titleMaskedLine
+        // Constat 5 de l'audit accueil : l'OpacityMask (ShaderEffect) et son
+        // masque source (3 Rectangle) n'ont de sens que pendant le défilement
+        // du marquee (titleClip.maskActive), un état rare et transitoire.
+        // Ils étaient pourtant instanciés dans CHAQUE carte, actifs ou non.
+        // Un Loader{active:} les crée/détruit avec maskActive au lieu de les
+        // garder en permanence : même rendu quand actif, coût nul sinon.
+        Loader {
+            id: titleMaskLoader
+            objectName: "titleMaskLoader"
             anchors.fill: parent
-            visible: titleClip.maskActive
-            source: titleLineSource
-            maskSource: titleFadeMask
-            cached: false
-        }
-    }
+            active: titleClip.maskActive
+            sourceComponent: Component {
+                Item {
+                    anchors.fill: parent
 
-    Item {
-        id: titleFadeMask
-        visible: titleClip.maskActive
-        x: -10000
-        y: -10000
-        width: titleLineClip.width
-        height: titleLineClip.height
+                    OpacityMask {
+                        id: titleMaskedLine
+                        anchors.fill: parent
+                        source: titleLineSource
+                        maskSource: titleFadeMask
+                        cached: false
+                    }
 
-        readonly property int leftW:
-            titleClip.leftFadeActive ? titleClip.marqueeFadeW : 0
-        readonly property int rightW:
-            titleClip.rightFadeActive ? titleClip.marqueeFadeW : 0
+                    Item {
+                        id: titleFadeMask
+                        x: -10000
+                        y: -10000
+                        width: titleLineClip.width
+                        height: titleLineClip.height
 
-        Rectangle {
-            visible: titleFadeMask.leftW > 0
-            x: 0
-            y: 0
-            width: titleFadeMask.leftW
-            height: parent.height
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#00FFFFFF" }
-                GradientStop { position: 1.0; color: "#FFFFFFFF" }
-            }
-        }
+                        readonly property int leftW:
+                            titleClip.leftFadeActive ? titleClip.marqueeFadeW : 0
+                        readonly property int rightW:
+                            titleClip.rightFadeActive ? titleClip.marqueeFadeW : 0
 
-        Rectangle {
-            x: titleFadeMask.leftW
-            y: 0
-            width: Math.max(0,
-                parent.width - titleFadeMask.leftW - titleFadeMask.rightW)
-            height: parent.height
-            color: "#FFFFFFFF"
-        }
+                        Rectangle {
+                            visible: titleFadeMask.leftW > 0
+                            x: 0
+                            y: 0
+                            width: titleFadeMask.leftW
+                            height: parent.height
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "#00FFFFFF" }
+                                GradientStop { position: 1.0; color: "#FFFFFFFF" }
+                            }
+                        }
 
-        Rectangle {
-            visible: titleFadeMask.rightW > 0
-            x: parent.width - titleFadeMask.rightW
-            y: 0
-            width: titleFadeMask.rightW
-            height: parent.height
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#FFFFFFFF" }
-                GradientStop { position: 1.0; color: "#00FFFFFF" }
+                        Rectangle {
+                            x: titleFadeMask.leftW
+                            y: 0
+                            width: Math.max(0,
+                                parent.width - titleFadeMask.leftW - titleFadeMask.rightW)
+                            height: parent.height
+                            color: "#FFFFFFFF"
+                        }
+
+                        Rectangle {
+                            visible: titleFadeMask.rightW > 0
+                            x: parent.width - titleFadeMask.rightW
+                            y: 0
+                            width: titleFadeMask.rightW
+                            height: parent.height
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "#FFFFFFFF" }
+                                GradientStop { position: 1.0; color: "#00FFFFFF" }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -383,62 +399,75 @@ Item {
             }
         }
 
-        OpacityMask {
+        // Constat 5 (voir titleMaskLoader plus haut) : même traitement pour
+        // le sous-titre, dont le marquee est plus rare encore (épisodes
+        // seulement).
+        Loader {
+            id: subtitleMaskLoader
+            objectName: "subtitleMaskLoader"
             anchors.fill: parent
-            visible: subtitleLineClip.maskActive
-            source: subtitleLineSource
-            maskSource: subtitleFadeMask
-            cached: false
-        }
-    }
+            active: subtitleLineClip.maskActive
+            sourceComponent: Component {
+                Item {
+                    anchors.fill: parent
 
-    Item {
-        id: subtitleFadeMask
-        visible: subtitleLineClip.maskActive
-        x: -10000
-        y: -10000
-        width: subtitleLineClip.width
-        height: subtitleLineClip.height
+                    OpacityMask {
+                        anchors.fill: parent
+                        source: subtitleLineSource
+                        maskSource: subtitleFadeMask
+                        cached: false
+                    }
 
-        readonly property int leftW:
-            subtitleLineClip.leftFadeActive
-            ? subtitleLineClip.marqueeFadeW : 0
-        readonly property int rightW:
-            subtitleLineClip.rightFadeActive
-            ? subtitleLineClip.marqueeFadeW : 0
+                    Item {
+                        id: subtitleFadeMask
+                        x: -10000
+                        y: -10000
+                        width: subtitleLineClip.width
+                        height: subtitleLineClip.height
 
-        Rectangle {
-            visible: subtitleFadeMask.leftW > 0
-            x: 0
-            y: 0
-            width: subtitleFadeMask.leftW
-            height: parent.height
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#00FFFFFF" }
-                GradientStop { position: 1.0; color: "#FFFFFFFF" }
-            }
-        }
+                        readonly property int leftW:
+                            subtitleLineClip.leftFadeActive
+                            ? subtitleLineClip.marqueeFadeW : 0
+                        readonly property int rightW:
+                            subtitleLineClip.rightFadeActive
+                            ? subtitleLineClip.marqueeFadeW : 0
 
-        Rectangle {
-            x: subtitleFadeMask.leftW
-            y: 0
-            width: Math.max(0,
-                parent.width - subtitleFadeMask.leftW - subtitleFadeMask.rightW)
-            height: parent.height
-            color: "#FFFFFFFF"
-        }
+                        Rectangle {
+                            visible: subtitleFadeMask.leftW > 0
+                            x: 0
+                            y: 0
+                            width: subtitleFadeMask.leftW
+                            height: parent.height
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "#00FFFFFF" }
+                                GradientStop { position: 1.0; color: "#FFFFFFFF" }
+                            }
+                        }
 
-        Rectangle {
-            visible: subtitleFadeMask.rightW > 0
-            x: parent.width - subtitleFadeMask.rightW
-            y: 0
-            width: subtitleFadeMask.rightW
-            height: parent.height
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#FFFFFFFF" }
-                GradientStop { position: 1.0; color: "#00FFFFFF" }
+                        Rectangle {
+                            x: subtitleFadeMask.leftW
+                            y: 0
+                            width: Math.max(0,
+                                parent.width - subtitleFadeMask.leftW - subtitleFadeMask.rightW)
+                            height: parent.height
+                            color: "#FFFFFFFF"
+                        }
+
+                        Rectangle {
+                            visible: subtitleFadeMask.rightW > 0
+                            x: parent.width - subtitleFadeMask.rightW
+                            y: 0
+                            width: subtitleFadeMask.rightW
+                            height: parent.height
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "#FFFFFFFF" }
+                                GradientStop { position: 1.0; color: "#00FFFFFF" }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

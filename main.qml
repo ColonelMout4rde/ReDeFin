@@ -127,14 +127,29 @@ Application {
                 settings.rememberJellyfinSession = nextRememberSession
         }
 
-        if (payload.serverUrl !== undefined && payload.serverUrl !== null)
-            settings.serverUrl = _normalizeServerUrl(payload.serverUrl)
+        // F8 (audit shell) : ces trois champs étaient réécrits sans
+        // comparaison préalable (contrairement aux booléens ci-dessus), à
+        // chaque saveSettingsRequested reçu de ShellPage — notamment à
+        // chaque chargement de l'accueil. L'implémentation Freebox peut
+        // réémettre le signal de changement même pour une valeur identique,
+        // d'où un risque d'E/S synchrone répétée pour rien.
+        if (payload.serverUrl !== undefined && payload.serverUrl !== null) {
+            var nextServerUrl = _normalizeServerUrl(payload.serverUrl)
+            if (settings.serverUrl !== nextServerUrl)
+                settings.serverUrl = nextServerUrl
+        }
 
-        if (payload.lastUserId !== undefined && payload.lastUserId !== null)
-            settings.lastUserId = _safeString(payload.lastUserId, _maxUserIdLen, "")
+        if (payload.lastUserId !== undefined && payload.lastUserId !== null) {
+            var nextLastUserId = _safeString(payload.lastUserId, _maxUserIdLen, "")
+            if (settings.lastUserId !== nextLastUserId)
+                settings.lastUserId = nextLastUserId
+        }
 
-        if (payload.lastUserName !== undefined && payload.lastUserName !== null)
-            settings.lastUserName = _safeString(payload.lastUserName, _maxUserNameLen, "")
+        if (payload.lastUserName !== undefined && payload.lastUserName !== null) {
+            var nextLastUserName = _safeString(payload.lastUserName, _maxUserNameLen, "")
+            if (settings.lastUserName !== nextLastUserName)
+                settings.lastUserName = nextLastUserName
+        }
 
         if (payload.lastAccessToken !== undefined && payload.lastAccessToken !== null)
             settings.lastAccessToken = ""

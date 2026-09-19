@@ -44,6 +44,33 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
   sur-le-champ, avec un éclat d'image et de son malgré la pause. En cours de
   lecture, rien ne change. Les sous-titres texte locaux en DirectPlay restent
   instantanés.
+- **Navigation dans les menus nettement plus rapide.** Principe nouveau : une
+  page s'affiche dès qu'elle est utilisable et ses images arrivent ensuite en
+  fondu, au lieu d'attendre derrière l'indicateur de chargement que tout soit
+  décodé. *Gains estimés à la lecture du code ; à confirmer sur boîtier.*
+  - **Toutes les pages** : l'indicateur de chargement se lève dès que la page
+    a fini de charger (jusqu'à 240 ms de moins par navigation), et son
+    animation allégée laisse le processeur à la page en construction.
+  - **Accueil** : environ une seconde d'attente fixe en moins après la
+    dernière réponse du serveur ; au retour sur l'accueil, les affiches ne
+    retiennent plus l'affichage au-delà de 300 ms ; remonter vers une rangée
+    « Récemment ajouté » éloignée n'affiche plus « Rechargement… ».
+  - **Bibliothèques** : le retour depuis une fiche n'impose plus 1,1 s de
+    stabilisation ; glissement plus régulier dans les grandes grilles, la
+    rangée suivante est prête avant la fin du glissement ; les informations
+    techniques du titre sélectionné se chargent par une requête bien plus
+    légère.
+  - **Fiches film, série et collection** : affichage dès l'arrivée des
+    données ; le fond part environ 300 ms plus tôt ; le logo est demandé à sa
+    taille d'affichage (il l'était en 900 × 900) ; les saisons sont demandées
+    en même temps que la série ; une requête en moins pour les chapitres ; la
+    durée moyenne des épisodes ne télécharge plus la liste complète des
+    épisodes à chaque ouverture (elle peut être légèrement moins exacte).
+  - **Serveur moins sollicité** : les listes ne demandent plus que les types
+    d'images réellement affichés ; l'avatar du profil est demandé à sa taille
+    d'affichage au lieu du fichier d'origine ; les affiches de l'accueil sont
+    demandées un peu moins grandes (la version haute définition de la carte
+    sélectionnée est inchangée).
 - **Resélectionner le réglage déjà actif ne fait plus rien.** Choisir la piste
   audio, le sous-titre ou la qualité déjà cochés relançait une négociation
   complète, donc plusieurs secondes de chargement pour un résultat identique,
@@ -124,6 +151,13 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
 - **Serveur en double selon la casse de l'adresse.** `HTTP://Serveur:8096` et
   `http://serveur:8096` désignent maintenant le même serveur. Si l'adresse
   avait été saisie avec des majuscules, le mot de passe est redemandé une fois.
+- **Fiche d'une série entièrement vue bloquée 2,6 s sur le chargement.** La
+  fiche attendait la rangée « À suivre », vide dans ce cas, jusqu'à
+  l'expiration d'un délai de garde. Elle s'affiche maintenant dès que la
+  réponse est arrivée.
+- **Bibliothèque en panne masquée dix minutes sur l'accueil.** Après une erreur
+  du serveur sur une bibliothèque, sa rangée « Récemment ajouté » n'était plus
+  redemandée pendant 10 min ; ce délai passe à 2 min.
 - Corrections sans effet visible attendu : un seul paramètre
   d'authentification dans l'adresse de lecture, plafond de canaux audio aligné
   sur le boîtier pour les DVD avec sous-titres image, profil matériel retiré

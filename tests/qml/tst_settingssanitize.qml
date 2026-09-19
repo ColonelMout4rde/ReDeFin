@@ -91,6 +91,24 @@ TestCase {
         return null;
     }
 
+    // ShellPage.qml n'a pas d'alias public dans main.qml (Loader privé
+    // `mainLoader`) : on le repère par duck-typing, comme UpdateManager plus
+    // haut, sur la combinaison _persistLoadedPageContext + saveSettingsRequested
+    // qui n'existe qu'à cet endroit de l'arbre.
+    function _findShellPage(root, maxDepth) {
+        if (!root || maxDepth <= 0) return null;
+        try {
+            if (typeof root._persistLoadedPageContext === "function" && root.saveSettingsRequested)
+                return root;
+        } catch (e0) {}
+        var kids = testCase._collectChildren(root);
+        for (var i = 0; i < kids.length; i++) {
+            var found = testCase._findShellPage(kids[i], maxDepth - 1);
+            if (found) return found;
+        }
+        return null;
+    }
+
     // Un compteur pour ne jamais réutiliser le même Application deux fois :
     // chaque test crée puis détruit la sienne, pour ne rien faire fuiter
     // (mainLoader/ShellPage) vers le test suivant dans la même session.
@@ -349,6 +367,48 @@ TestCase {
 
         compare(app.settingsRef.lastAccessToken, "");
         verify(app.settingsRef.usersJson.indexOf("tok-TEST-LEGACY") < 0);
+
+        destroyApp(app);
+    }
+
+    /* ===== F8 (audit shell) : pas de saveSettingsRequested si rien ne change ===== */
+    //
+    // ShellPage._persistLoadedPageContext("homepage.qml") est appelée à
+    // CHAQUE chargement de l'accueil. Avant le correctif, elle réémettait
+    // systématiquement saveSettingsRequested avec les trois mêmes valeurs de
+    // session, ce qui fait réécrire fbx.application.Settings à chaque fois
+    // côté main.qml (voir _applySettingsPayload et
+    // tests/js/mainsettingsguard.test.js pour le contrat symétrique côté
+    // écriture). Ici on vérifie le signal lui-même : c'est une décision
+    // purement locale à ShellPage (pas de dépendance à un comportement réel
+    // du firmware), donc testable de façon comportementale, contrairement à
+    // la réécriture de Settings elle-même (voir le commentaire de
+    // mainsettingsguard.test.js).
+    function test_persistLoadedPageContext_homepageSkipsSaveWhenNothingChanged() {
+        var app = newApp();
+        var shell = testCase._findShellPage(app, 16);
+        verify(shell !== null, "ShellPage introuvable dans l'arbre main.qml");
+
+        shell.sessionServerUrl = "http://jellyfin.test:8096";
+        shell.sessionUserId = "user-1";
+        shell.sessionUserName = "Alice";
+        shell.settings.serverUrl = "http://jellyfin.test:8096";
+        shell.settings.lastUserId = "user-1";
+        shell.settings.lastUserName = "Alice";
+
+        var saveCount = 0;
+        shell.saveSettingsRequested.connect(function () { saveCount++; });
+
+        shell._persistLoadedPageContext("homepage.qml");
+        compare(saveCount, 0,
+                "les trois valeurs sont déjà celles de Settings : aucune émission attendue");
+
+        shell._persistLoadedPageContext("homepage.qml");
+        compare(saveCount, 0, "un second appel identique ne doit rien émettre non plus");
+
+        shell.sessionUserName = "Bob";
+        shell._persistLoadedPageContext("homepage.qml");
+        compare(saveCount, 1, "un champ a réellement changé : une seule émission");
 
         destroyApp(app);
     }

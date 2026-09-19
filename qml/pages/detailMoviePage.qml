@@ -7,9 +7,14 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
+import "../js/PosterSizing.js" as PosterSizing
+import "../js/DetailGatePolicy.js" as DetailGatePolicy
 FocusScope {
     id: detailMoviePage
     width: 1280; height: 720; focus: true
+    // Repère de temps pour l'instrumentation FICHE (DevLog, inerte en public).
+    property double _ficheT0: 0
     /* ===== Contexte ===== */
     property string accessToken: ""
     property string userId: ""
@@ -94,22 +99,6 @@ FocusScope {
     property var castPeople: []
     property int  castInitialLimit: 12
     property bool castExpanded: false
-    // Préchargement direct des portraits Cast depuis DetailMoviePage.
-    // Objectif: lancer les URLs portraits dès que fetchItem() donne People,
-    // donc bien avant que l'utilisateur descende jusqu'au bloc Distribution.
-    property bool castPortraitPrewarmEnabled: true
-    property int  castPortraitPrewarmCount: 6
-    property int  castPortraitPrewarmImmediateCount: 3
-    property int  castPortraitPrewarmDeferredCount: 3
-    property bool _castPortraitPrewarmSecondPhase: false
-    readonly property int castPortraitPrewarmW: 322
-    readonly property int castPortraitPrewarmH: 483
-    property var  castPortraitPrewarmPeople: []
-    property int  _castPortraitPrewarmEpoch: 0
-    function _clearCastPortraitPrewarm(){
-        castPortraitPrewarmPeople = []; _castPortraitPrewarmSecondPhase = false; _castPortraitPrewarmEpoch++
-        if (castPortraitPrewarmDeferredTimer.running) castPortraitPrewarmDeferredTimer.stop()
-    }
     property int  similarWarmCount: 14
     property bool similarExpanded: false
     property var  chipModel: []
@@ -118,7 +107,6 @@ FocusScope {
     function _resetData(clearError){
         item = null
         castPeopleAll = []; castPeople = []; castExpanded = false
-        _clearCastPortraitPrewarm()
         similarExpanded = false
         chipModel = []; genresLine = ""
         posterLogoFailed = false
@@ -132,44 +120,6 @@ FocusScope {
         castExpanded = castPeopleAll.length <= castInitialLimit
         castPeople = castExpanded ? castPeopleAll : castPeopleAll.slice(0, castInitialLimit)
     }
-    function _personPrimaryTagForPrewarm(p) {
-        if (!p) return ""
-        if (p.PrimaryImageTag) return String(p.PrimaryImageTag)
-        if (p.ImageTags && p.ImageTags.Primary) return String(p.ImageTags.Primary)
-        return ""
-    }
-
-    function castPortraitUrlForPrewarm(p) {
-        if (!castPortraitPrewarmEnabled || !p || !p.Id || !serverUrl) return ""
-        var tag = _personPrimaryTagForPrewarm(p)
-        if (!tag) return ""
-        // Même URL et mêmes dimensions que CastPage pour maximiser le partage du cache QML.
-        return Jellyfin.itemImageUrl(serverUrl, p.Id, "Primary", tag, {
-            format: "jpg",
-            quality: 82,
-            fillWidth: castPortraitPrewarmW,
-            fillHeight: castPortraitPrewarmH
-        })
-    }
-    function _refreshCastPortraitPrewarm() {
-        if (!castPortraitPrewarmEnabled || disposed || !visible || !serverUrl || !castPeopleAll || castPeopleAll.length <= 0) {
-            _clearCastPortraitPrewarm()
-            return
-        }
-        var cap = Math.min(Math.max(0, castPortraitPrewarmCount | 0), castPeopleAll.length)
-        var first = Math.min(Math.max(0, castPortraitPrewarmImmediateCount | 0), cap)
-        var deferred = Math.max(0, castPortraitPrewarmDeferredCount | 0)
-        var n = _castPortraitPrewarmSecondPhase ? Math.min(cap, first + deferred) : first
-        var arr = []
-        for (var i = 0; i < n; ++i) {
-            var p = castPeopleAll[i]
-            if (p && p.Id && _personPrimaryTagForPrewarm(p)) arr.push(p)
-        }
-        castPortraitPrewarmPeople = arr
-        _castPortraitPrewarmEpoch++
-        if (!_castPortraitPrewarmSecondPhase && cap > n && !disposed && visible && !castPortraitPrewarmDeferredTimer.running)
-            castPortraitPrewarmDeferredTimer.restart()
-    }
     function _hydrateCastNow(){
         if (castExpanded || !castPeopleAll || !castPeopleAll.length) return
         castExpanded = true; castPeople = castPeopleAll
@@ -179,7 +129,6 @@ FocusScope {
         }
     }
     onCastPeopleChanged: {
-        _refreshCastPortraitPrewarm()
         if (castPageLoader.item) try { castPageLoader.item.people = castPeople } catch(e) {}
         _updateExtendedSectionGates()
     }
@@ -384,7 +333,16 @@ FocusScope {
     property bool gateBGReady: false
     property bool serverResponseSlow: false
     // Une fiche chaude peut rester interactive pendant la révalidation réseau.
-    readonly property bool hardLoading: (fetchInFlight && !warmSnapshotVisible) || !gateMinDelay || !gateItemReady || !gatePosterReady || !gateBGReady
+    // Décision produit (audit-fiches.md, point 5) : le rideau dur n'attend
+    // plus le poster/logo ni le backdrop (gatePosterReady/gateBGReady restent
+    // calculées ci-dessous pour leurs propres fondus, voir _updatePosterGate()/
+    // _updateBGGate(), mais ne bloquent plus l'affichage de la fiche). Un
+    // placeholder de couleur et un fondu existent déjà sur ces images.
+    readonly property bool hardLoading: !DetailGatePolicy.pageCanReveal({
+        fetchInFlight: fetchInFlight && !warmSnapshotVisible,
+        itemReady: gateItemReady,
+        minDelayReady: gateMinDelay
+    })
     /* ===== Loading étendu semi-strict (hero + premières sections movie) =====
        On garde le CircleDotsLoader jusqu'à ce que le hero soit prêt ET que les blocs
        Cast / Similar soient au moins instanciés ou déclarés vides. Cast/Similar gardent
@@ -584,7 +542,10 @@ FocusScope {
         gateMinDelay = gateItemReady = gatePosterReady = gateBGReady = true
         _releaseExtendedGates()
     }
-    Timer { id: minLoadTimer; interval: 220; repeat: false; onTriggered: gateMinDelay = true }
+    // Plancher réduit à 0 (point 5) : rien d'autre que hardLoading ne dépend
+    // de gateMinDelay ; le Timer reste pour garder l'armement asynchrone
+    // (safeRestart), pas pour retarder le rideau.
+    Timer { id: minLoadTimer; interval: 0; repeat: false; onTriggered: gateMinDelay = true }
     Timer {
         id: gateTimeoutTimer
         interval: 1800; repeat: false
@@ -592,7 +553,10 @@ FocusScope {
         // le retour réel de Jellyfin. Cela évite une page partiellement vide/noire.
         onTriggered: { if (fetchInFlight) serverResponseSlow = true }
     }
-    Timer { id: layoutReadyTimer; interval: 320; repeat: false; onTriggered: gateLayoutReady = true }
+    // 320 -> 60 ms (point 5) : ce délai ne protège qu'une marge de sécurité
+    // de mise en page, pas le focus (gateLayoutReady ne gouverne que
+    // extendedLoading, voir plus haut).
+    Timer { id: layoutReadyTimer; interval: 60; repeat: false; onTriggered: gateLayoutReady = true }
     Timer { id: extendedLoadingTimeout; interval: 2600; repeat: false; onTriggered: _releaseExtendedGates() }
     Timer {
         id: detailReturnReleaseTimer
@@ -699,45 +663,6 @@ FocusScope {
     }
     function _focusKey(){ return "detailMovie|" + _movieId() }
     signal requestPlay(string itemId, string accessToken, string userId, string serverUrl, string itemTitle)
-    // Pool root-level : précharge les portraits Cast même quand CastPage est encore hors écran.
-    // Le léger opacity évite certains builds Qt/Freebox qui retardent des Images totalement invisibles.
-    Timer {
-        id: castPortraitPrewarmDeferredTimer
-        interval: 1500
-        repeat: false
-        onTriggered: {
-            if (detailMoviePage.disposed || !detailMoviePage.visible) return
-            if (detailMoviePage.visualLoading) { restart(); return }
-            detailMoviePage._castPortraitPrewarmSecondPhase = true
-            detailMoviePage._refreshCastPortraitPrewarm()
-        }
-    }
-    Item {
-        id: castPortraitPrewarmPool
-        x: -4
-        y: -4
-        width: 1
-        height: 1
-        opacity: 0.01
-        visible: !detailMoviePage.disposed && detailMoviePage.visible && castPortraitPrewarmEnabled && castPortraitPrewarmPeople && castPortraitPrewarmPeople.length > 0
-        z: -10000
-        Repeater {
-            model: castPortraitPrewarmPeople ? castPortraitPrewarmPeople.length : 0
-            delegate: Image {
-                width: 1
-                height: 1
-                visible: true
-                asynchronous: true
-                cache: index < Math.min(detailMoviePage.castPortraitPrewarmImmediateCount, detailMoviePage.castPortraitPrewarmCount)
-                mipmap: false
-                smooth: false
-                fillMode: Image.PreserveAspectCrop
-                source: (!detailMoviePage.disposed && detailMoviePage.visible) ? detailMoviePage.castPortraitUrlForPrewarm(detailMoviePage.castPortraitPrewarmPeople[index]) : ""
-                sourceSize.width: detailMoviePage.castPortraitPrewarmW
-                sourceSize.height: detailMoviePage.castPortraitPrewarmH
-            }
-        }
-    }
     signal requestNavigation(string page)
     signal requestBackToMenu()
     Timer { id: saveFocusTimer; interval: 0; repeat: false; onTriggered: { _saveQueued = false; _saveFocusSnapshotNow() } }
@@ -1138,7 +1063,12 @@ FocusScope {
     readonly property int bgW: 1280
     readonly property int bgH: 720
     property int bgBlur: 8
-    property real bgDarken: 0.40
+    // M4 : remplace l'ancienne image à 0,90 d'opacité surmontée d'un voile
+    // noir à 0,40 (bgDarken) par une seule couche équivalente. Sur un fond
+    // noir, composer un voile de a=0,40 sur une image déjà à b=0,90 donne
+    // (1-a)*b = 0,60*0,90 = 0,54 : même rendu, un remplissage alpha plein
+    // écran en moins par image affichée (~0,9 Mpx sur le SGX535).
+    readonly property real bgOpacity: 0.54
     // URLs image Jellyfin sans token : ne jamais logger Image.source ou URL /Items/... brute.
 
 
@@ -1152,7 +1082,20 @@ FocusScope {
     readonly property int reqPosterH: Math.round(posterH * posterOS)
     readonly property int reqPosterHqW: Math.round(posterW * posterHqOS)
     readonly property int reqPosterHqH: Math.round(posterH * posterHqOS)
+    // F5 : le logo n'est jamais affiché à plus de 90% du cadre 230x330 sur la
+    // fiche (~207x297) ; la taille demandée au serveur suit ce format, pas le
+    // plein écran de l'overlay (voir movieLogoOverlayUrl / _currentArtUrl()).
+    readonly property var _logoReqSize: PosterSizing.requestedImageSize(posterW, posterH, 1.3, 80)
     property string movieLogoUrl: {
+        if (!hasItem || isMusicVideo) return ""
+        var tag = item.ImageTags && item.ImageTags.Logo ? String(item.ImageTags.Logo) : ""
+        return tag ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", tag, {
+            maxWidth: _logoReqSize.width, maxHeight: _logoReqSize.height, quality: 85, format: "png"
+        }) : ""
+    }
+    // Grande taille réservée à openPosterOverlay (plein écran) : ne jamais
+    // servir cette URL pour l'affichage courant de la fiche.
+    property string movieLogoOverlayUrl: {
         if (!hasItem || isMusicVideo) return ""
         var tag = item.ImageTags && item.ImageTags.Logo ? String(item.ImageTags.Logo) : ""
         return tag ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", tag, {
@@ -1237,6 +1180,7 @@ FocusScope {
             posterFxTimer.stop(); posterFxReady = false
             actionsArmTimer.stop(); actionsArmed = false
         } else {
+            DevLog.log("FICHE6", "hardLoading=false movie dt=" + (Date.now() - _ficheT0))
             posterFxReady = false; safeRestart(posterFxTimer)
             actionsArmed = false
             safeRestart(actionsArmTimer)
@@ -1249,6 +1193,7 @@ FocusScope {
     }
     onVisualLoadingChanged: {
         if (!visualLoading) {
+            DevLog.log("FICHE7", "curtain movie dt=" + (Date.now() - _ficheT0))
             _updateExtendedSectionGates()
             _queueFocusRepair("visualLoadingReleased", 24)
         }
@@ -1256,6 +1201,13 @@ FocusScope {
             _scheduleDetailReturnRelease()
         _scheduleClockHudSync()
     }
+    // FICHE : trace la levée de chaque garde, avec son nom pour raison.
+    onGateItemReadyChanged: if (gateItemReady) DevLog.log("FICHE5", "gate=item movie dt=" + (Date.now() - _ficheT0))
+    onGateMinDelayChanged: if (gateMinDelay) DevLog.log("FICHE5", "gate=minDelay movie dt=" + (Date.now() - _ficheT0))
+    onGatePosterReadyChanged: if (gatePosterReady) DevLog.log("FICHE5", "gate=poster movie dt=" + (Date.now() - _ficheT0))
+    onGateCastBlockReadyChanged: if (gateCastBlockReady) DevLog.log("FICHE5", "gate=cast movie dt=" + (Date.now() - _ficheT0))
+    onGateSimilarBlockReadyChanged: if (gateSimilarBlockReady) DevLog.log("FICHE5", "gate=similar movie dt=" + (Date.now() - _ficheT0))
+    onGateLayoutReadyChanged: if (gateLayoutReady) DevLog.log("FICHE5", "gate=layout movie dt=" + (Date.now() - _ficheT0))
     onBaseVisualLoadingChanged: {
         if (detailReturnRefreshGate)
             _scheduleDetailReturnRelease()
@@ -1362,11 +1314,11 @@ FocusScope {
                 if (t !== _fetchToken || disposed) return
                 _fetchHandle = null
                 item = res
+                DevLog.log("FICHE2", "item movie dt=" + (Date.now() - _ficheT0))
                 warmSnapshotVisible = false
                 _warmDetailSnapshot = null
                 castPeopleAll = (res && res.People) ? res.People : []
                 _applyCastWarm()
-                _refreshCastPortraitPrewarm()
                 similarExpanded = false
                 recomputeChips()
                 serverResponseSlow = false
@@ -1376,7 +1328,12 @@ FocusScope {
                     _detailReturnForceRefreshPending = false
                     _detailReturnDataRefreshDone = true
                 }
-                _syncPosterSources(); _updatePosterGate(); safeRestart(bgUpdateTimer)
+                // F2 : au premier affichage, ne pas attendre les 320 ms du
+                // debounce pour lancer la requête du backdrop. Le timer reste
+                // utile pour les rafraîchissements suivants (retour Player,
+                // retour PersonPage, changement d'item sur la même instance
+                // de page).
+                _syncPosterSources(); _updatePosterGate(); backdrop.updateBackdropNow()
                 if (castPageLoader.item) wireCastLoader()
                 if (similarLoader.item) wireSimilarLoader()
                 safeCallLater(function(){
@@ -1489,10 +1446,17 @@ FocusScope {
     }
     /* ===== Lifecycle ===== */
     Component.onCompleted: {
+        _ficheT0 = Date.now()
+        DevLog.log("FICHE1", "onCompleted movie dt=0")
         initialAuthoritativeFetchPending = true
         _hydrateSensitiveContextFromShared()
         _consumeDetailReturnRefreshMarker("component-completed")
-        safeRestart(fetchDebounce)
+        // L'hydratation ci-dessus peut avoir déclenché plusieurs onXChanged et
+        // donc armé fetchDebounce. L'appel immédiat ci-dessous possède déjà le
+        // contexte final : supprimer ce doublon économise 80 ms au premier
+        // affichage (même correctif que detailSeriePage.qml).
+        fetchDebounce.stop()
+        fetchItemIfReady()
         safeCallLater(function(){
             uiReady = true
             if (rootFlick) rootFlick.contentY = 0
@@ -1516,8 +1480,6 @@ FocusScope {
                 _ctxChanged()
                 _queueFocusRepair("detailmovie-visible", 16)
             }
-            if (castPeopleAll && castPeopleAll.length > 0)
-                _refreshCastPortraitPrewarm()
         } else {
             // Page conservée en mémoire : lever le rideau PENDANT qu'elle est
             // cachée garantit qu'aucune frame obsolète ne puisse apparaître
@@ -1527,7 +1489,6 @@ FocusScope {
                 _armDetailReturnRefresh("hidden-for-player", true, "player")
             else if (returnScope === "person")
                 _armDetailReturnRefresh("hidden-for-person", false, "person")
-            _clearCastPortraitPrewarm()
         }
     }
     onSharedChanged: {
@@ -1615,16 +1576,14 @@ FocusScope {
                     property int loadToken: 0
                     onStatusChanged: {
                         if (loadToken !== backdrop._token) return
-                        if (status === Image.Ready) { backdrop.lastFull = String(source || ""); backdrop.loadingFull = ""; opacity = 0.90; gateBGReady = true }
-                        else if (status === Image.Error) { backdrop.loadingFull = ""; opacity = 0.0; gateBGReady = true }
+                        if (status === Image.Ready) {
+                            backdrop.lastFull = String(source || ""); backdrop.loadingFull = ""; opacity = bgOpacity; gateBGReady = true
+                            DevLog.log("FICHE4", "bg-ready movie dt=" + (Date.now() - _ficheT0))
+                        } else if (status === Image.Error) {
+                            backdrop.loadingFull = ""; opacity = 0.0; gateBGReady = true
+                            DevLog.log("FICHE4", "bg-error movie dt=" + (Date.now() - _ficheT0))
+                        }
                     }
-                }
-                Rectangle {
-                    anchors.fill: bgImg
-                    z: bgImg.z + 1
-                    color: "#000000"
-                    opacity: bgDarken
-                    visible: (bgImg.source && ("" + bgImg.source).length > 0) && bgDarken > 0.001
                 }
                 function computeFullUrl(){
                     return item ? Jellyfin.itemBackdropOrPrimaryUrl(serverUrl, item, {
@@ -1645,7 +1604,10 @@ FocusScope {
                     if (ful === lastFull || ful === loadingFull) { _updateBGGate(); return }
                     loadingFull = ful; _token += 1; bgImg.loadToken = _token
                     gateBGReady = false
-                    if (String(bgImg.source || "") !== String(ful || "")) bgImg.source = ful
+                    if (String(bgImg.source || "") !== String(ful || "")) {
+                        bgImg.source = ful
+                        DevLog.log("FICHE3", "bg-src movie dt=" + (Date.now() - _ficheT0) + " " + DevLog.maskUrl(ful))
+                    }
                     _updateBGGate()
                 }
             }
@@ -2646,6 +2608,10 @@ FocusScope {
                                 anchors.centerIn: parent
                                 width: parent.width * 0.90
                                 height: parent.height * 0.90
+                                // F5 : borne le décodage à la taille réellement demandée
+                                // au serveur, au lieu de décoder le PNG à sa taille native.
+                                sourceSize.width: _logoReqSize.width
+                                sourceSize.height: _logoReqSize.height
                                 asynchronous: true
                                 cache: true
                                 mipmap: false
@@ -2695,7 +2661,7 @@ FocusScope {
                         height: (status === Loader.Ready && castPageLoader.item) ? (castPageLoader.item.implicitHeight || 0) : 0
                         onStatusChanged: _updateExtendedSectionGates()
                         onHeightChanged: _updateExtendedSectionGates()
-                        onLoaded: { wireCastLoader(); _refreshCastPortraitPrewarm(); _updateExtendedSectionGates() }
+                        onLoaded: { wireCastLoader(); _updateExtendedSectionGates() }
                     }
                     Loader {
                         id: chaptersLoader
@@ -2708,6 +2674,13 @@ FocusScope {
                             item.serverUrl = Qt.binding(function(){ return detailMoviePage.serverUrl })
                             item.accessToken = Qt.binding(function(){ return detailMoviePage.accessToken })
                             item.itemId = Qt.binding(function(){ return detailMoviePage.itemId })
+                            // M1 : item.Chapters est déjà dans la réponse de la
+                            // fiche (fetchUserItem) ; évite un second GET complet
+                            // de l'item rien que pour les chapitres.
+                            item.itemChapters = Qt.binding(function(){
+                                return (detailMoviePage.item && detailMoviePage.item.Chapters !== undefined)
+                                    ? detailMoviePage.item.Chapters : null
+                            })
                             item.sectionLeftMargin = 28
                             item.requestFocusAbove.connect(function(){
                                 if (hasCast()) {
@@ -2838,9 +2811,11 @@ FocusScope {
     }
     /* ===== Overlay helpers ===== */
     function _currentArtUrl(){
-        if (movieLogoUrl && !posterLogoFailed && posterLogo.status === Image.Ready) return movieLogoUrl
+        // F5 : les usages de cette fonction sont tous plein écran (overlay
+        // affiche, lecteur de résumé) : servir la grande variante du logo.
+        if (movieLogoUrl && !posterLogoFailed && posterLogo.status === Image.Ready) return movieLogoOverlayUrl
         if (movieCoverUrl && movieCoverUrl.length) return movieCoverUrl
-        return movieLogoUrl
+        return movieLogoOverlayUrl
     }
     function openOverlay(mode, payload){
         if (!hasItem) return

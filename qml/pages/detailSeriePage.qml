@@ -3,11 +3,16 @@ import "../components" as Components
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
+import "../js/DevLog.js" as DevLog
+import "../js/DetailGatePolicy.js" as DetailGatePolicy
+import "../js/PosterSizing.js" as PosterSizing
 FocusScope {
     id: detailSeriePage
     width: parent ? parent.width : 1280
     height: parent ? parent.height : 720
     focus: true
+    // Repère de temps pour l'instrumentation FICHE (DevLog, inerte en public).
+    property double _ficheT0: 0
     property string accessToken: ""
     property string userId: ""
     property string serverUrl: ""
@@ -108,6 +113,10 @@ FocusScope {
     property bool averageEpisodeDurationLoading: false
     property int _avgDurationSeq: 0
     property var _avgDurationHandle: null
+    // F4 : appel réseau différé jusqu'à la levée du rideau (voir
+    // _refreshAverageEpisodeDuration()/onHardLoadingChanged plus bas).
+    property string _avgDurationDeferredSeriesId: ""
+    property int _avgDurationDeferredFallbackTicks: 0
     function _applyAverageDurationTicks(ticks){
         var t = Number(ticks || 0);
         averageEpisodeDurationText = t > 0 ? SeasonUtils.formatTicksToHhMm(t) : "";
@@ -119,14 +128,10 @@ FocusScope {
         try { if (h && h.cancel) h.cancel("context_changed") } catch(e) {}
         averageEpisodeDurationLoading = false
         averageEpisodeDurationText = ""
+        _avgDurationDeferredSeriesId = ""
+        _avgDurationDeferredFallbackTicks = 0
     }
-    function _refreshAverageEpisodeDuration(){
-        _resetAverageEpisodeDuration();
-        var sid = _seriesId(), fallbackTicks = item ? Number(item.RunTimeTicks || 0) : 0;
-        if (!serverUrl || !accessToken || !userId || !sid || !Jellyfin.fetchSeriesAverageEpisodeRuntimeTicks) {
-            _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
-            return;
-        }
+    function _launchAverageEpisodeDurationRequest(sid, fallbackTicks){
         var seq = ++_avgDurationSeq;
         averageEpisodeDurationLoading = true;
         var requestHandle = null
@@ -142,6 +147,27 @@ FocusScope {
             _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
         });
         _avgDurationHandle = requestHandle
+    }
+    function _refreshAverageEpisodeDuration(){
+        _resetAverageEpisodeDuration();
+        var sid = _seriesId(), fallbackTicks = item ? Number(item.RunTimeTicks || 0) : 0;
+        if (!serverUrl || !accessToken || !userId || !sid || !Jellyfin.fetchSeriesAverageEpisodeRuntimeTicks) {
+            _applyAverageDurationTicks(MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks));
+            return;
+        }
+        // F4 (audit-fiches.md) : quand la série connaît déjà une durée
+        // d'épisode plausible (RunTimeTicks), le bridge répond sans requête
+        // réseau (voir fetchSeriesAverageEpisodeRuntimeTicks) : rien à
+        // différer. Sinon, l'estimation nécessite un appel réseau borné
+        // (Limit=20 côté bridge) ; le différer jusqu'à la levée du rideau
+        // évite de le faire concourir avec l'item et les saisons sur le
+        // chemin critique.
+        if (MediaCatalog.seriesRuntimeTicksFallback(fallbackTicks) > 0 || !hardLoading) {
+            _launchAverageEpisodeDurationRequest(sid, fallbackTicks);
+            return;
+        }
+        _avgDurationDeferredSeriesId = sid;
+        _avgDurationDeferredFallbackTicks = fallbackTicks;
     }
     property string nextUpDurationText: ""
     property string nextUpEndText: ""
@@ -930,7 +956,16 @@ FocusScope {
     property bool gatePosterReady: false
     property bool gateBGReady: false
     property bool serverResponseSlow: false
-    readonly property bool hardLoading: (fetchInFlight && !warmSnapshotVisible) || !gateMinDelay || !gateItemReady || !gatePosterReady || !gateBGReady
+    // Décision produit (audit-fiches.md, point 5) : le rideau dur n'attend
+    // plus le poster/logo ni le backdrop (gatePosterReady/gateBGReady restent
+    // calculées ci-dessous pour leurs propres fondus, mais ne bloquent plus
+    // l'affichage de la fiche). Un placeholder de couleur et un fondu
+    // existent déjà sur ces images.
+    readonly property bool hardLoading: !DetailGatePolicy.pageCanReveal({
+        fetchInFlight: fetchInFlight && !warmSnapshotVisible,
+        itemReady: gateItemReady,
+        minDelayReady: gateMinDelay
+    })
     property bool uiReady: false
     property bool gateNextUpReady: false
     property bool gateSeasonsBlockReady: false
@@ -1040,10 +1075,16 @@ FocusScope {
             return;
         }
         try {
-            if (nextUpLoader.status === Loader.Error) gateNextUpReady = true;
-            else if (heavyStageNextUp && nextUpLoader.status === Loader.Ready && nextUpLoader.item) {
-                if ((nextUpLoader.height|0) > 0) gateNextUpReady = true;
-            }
+            var nextUpStatus = "loading";
+            if (nextUpLoader.status === Loader.Error) nextUpStatus = "error";
+            else if (heavyStageNextUp && nextUpLoader.status === Loader.Ready) nextUpStatus = "ready";
+            if (DetailGatePolicy.nextUpGateReleased({
+                    loaderStatus: nextUpStatus,
+                    blockReady: !!(nextUpLoader.item && nextUpLoader.item.ready),
+                    hasContent: !!(nextUpLoader.item && nextUpLoader.item.hasContent),
+                    height: nextUpLoader.height|0
+                }))
+                gateNextUpReady = true;
         } catch(e1) {}
         try {
             gateSeasonsBlockReady = seasonsBlockFullyReady
@@ -1064,7 +1105,10 @@ FocusScope {
         gateMinDelay=true; gateItemReady=true; gatePosterReady=true; gateBGReady=true;
         _releaseExtendedGates();
     }
-    Timer { id: minLoadTimer; interval: 220; repeat: false; onTriggered: gateMinDelay=true }
+    // Plancher réduit à 0 (point 5) : rien d'autre que hardLoading ne dépend
+    // de gateMinDelay ; le Timer reste pour garder l'armement asynchrone,
+    // pas pour retarder le rideau.
+    Timer { id: minLoadTimer; interval: 0; repeat: false; onTriggered: gateMinDelay=true }
     Timer {
         id: gateTimeoutTimer
         interval: 1800
@@ -1073,9 +1117,12 @@ FocusScope {
         // est lent : seul le callback Jellyfin peut libérer gateItemReady.
         onTriggered: { if (fetchInFlight) serverResponseSlow=true; }
     }
+    // 320 -> 60 ms (point 5) : ce délai ne protège qu'une marge de sécurité
+    // de mise en page, pas le focus (gateLayoutReady ne gouverne que
+    // extendedLoading, voir plus haut).
     Timer {
         id: layoutReadyTimer
-        interval: 320
+        interval: 60
         repeat: false
         onTriggered: gateLayoutReady = true
     }
@@ -1094,7 +1141,17 @@ FocusScope {
 
     property string fallbackPosterUrl: ""
     property bool   posterLogoFailed: false
+    // F5 : le logo n'est jamais affiché à plus de 90% du cadre 230x330 sur la
+    // fiche (~207x297) ; la taille demandée au serveur suit ce format, pas le
+    // plein écran de l'overlay (voir seriesLogoOverlayUrl / effectivePosterOverlayUrl).
+    readonly property var _logoReqSize: PosterSizing.requestedImageSize(posterW, posterH, 1.3, 80)
     property string seriesLogoUrl: (hasItem && item.ImageTags && item.ImageTags.Logo)
+        ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", item.ImageTags.Logo,
+                               { maxWidth:_logoReqSize.width, maxHeight:_logoReqSize.height, quality:85, format:"png" })
+        : ""
+    // Grande taille réservée à openPosterOverlay (plein écran) : ne jamais
+    // servir cette URL pour l'affichage courant de la fiche.
+    property string seriesLogoOverlayUrl: (hasItem && item.ImageTags && item.ImageTags.Logo)
         ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", item.ImageTags.Logo,
                                { maxWidth:900, maxHeight:900, quality:85, format:"png" })
         : ""
@@ -1133,6 +1190,11 @@ FocusScope {
     }
     readonly property string effectivePosterUrl: (seriesLogoUrl && !posterLogoFailed && posterLogo.status !== Image.Error)
         ? seriesLogoUrl : seriesCoverUrl
+    // F5 : grande variante réservée aux vues plein écran (overlay affiche,
+    // lecteur de résumé) ; effectivePosterUrl reste la petite taille utilisée
+    // sur la fiche.
+    readonly property string effectivePosterOverlayUrl: (seriesLogoUrl && !posterLogoFailed && posterLogo.status !== Image.Error)
+        ? seriesLogoOverlayUrl : seriesCoverUrl
     function _setImageSourceIfChanged(img, url) {
         if (!img) return;
         var next = String(url || "");
@@ -1174,18 +1236,42 @@ FocusScope {
             posterFxTimer.stop(); posterFxReady=false;
             nextUpDurationText=""; nextUpEndText="";
         } else {
+            DevLog.log("FICHE6", "hardLoading=false serie dt=" + (Date.now() - _ficheT0));
             posterFxReady=false;
             posterFxTimer.restart();
             _startExtendedLoadingGates();
             _updateNextUpMeta();
             _schedulePokeRestore();
             _scheduleViewportGate();
+            // F4 : lance la requête de durée moyenne différée pendant le
+            // rideau (voir _refreshAverageEpisodeDuration()), maintenant que
+            // la fiche est affichée.
+            if (_avgDurationDeferredSeriesId) {
+                var avgSid = _avgDurationDeferredSeriesId
+                var avgFallback = _avgDurationDeferredFallbackTicks
+                _avgDurationDeferredSeriesId = ""
+                _avgDurationDeferredFallbackTicks = 0
+                _launchAverageEpisodeDurationRequest(avgSid, avgFallback)
+            }
         }
     }
+    // FICHE : trace la levée de chaque garde, avec son nom pour raison.
+    onGateItemReadyChanged: if (gateItemReady) DevLog.log("FICHE5", "gate=item serie dt=" + (Date.now() - _ficheT0))
+    onGateMinDelayChanged: if (gateMinDelay) DevLog.log("FICHE5", "gate=minDelay serie dt=" + (Date.now() - _ficheT0))
+    onGatePosterReadyChanged: if (gatePosterReady) DevLog.log("FICHE5", "gate=poster serie dt=" + (Date.now() - _ficheT0))
+    onGateNextUpReadyChanged: if (gateNextUpReady) DevLog.log("FICHE5", "gate=nextUp serie dt=" + (Date.now() - _ficheT0))
+    onGateSeasonsBlockReadyChanged: if (gateSeasonsBlockReady) DevLog.log("FICHE5", "gate=seasons serie dt=" + (Date.now() - _ficheT0))
+    onGateLayoutReadyChanged: if (gateLayoutReady) DevLog.log("FICHE5", "gate=layout serie dt=" + (Date.now() - _ficheT0))
+    onVisualLoadingChanged: if (!visualLoading) DevLog.log("FICHE7", "curtain serie dt=" + (Date.now() - _ficheT0))
     readonly property int bgW: 1280
     readonly property int bgH: 720
     property int bgBlur: 8
-    property real bgDarken: 0.40
+    // M4 : remplace l'ancienne image à 0,90 d'opacité surmontée d'un voile
+    // noir à 0,40 (bgDarken) par une seule couche équivalente. Sur un fond
+    // noir, composer un voile de a=0,40 sur une image déjà à b=0,90 donne
+    // (1-a)*b = 0,60*0,90 = 0,54 : même rendu, un remplissage alpha plein
+    // écran en moins par image affichée.
+    readonly property real bgOpacity: 0.54
     Timer { id: bgUpdateTimer; interval: 320; repeat: false; onTriggered: backdrop.updateBackdropNow() }
     function _updateBGGate(){
         if (gateBGReady) return;
@@ -1710,12 +1796,21 @@ FocusScope {
         posterLogoFailed=false;
         nextUpDurationText=""; nextUpEndText="";
         _resetAverageEpisodeDuration();
+        // F3 : seul itemId (avec serverUrl/accessToken/userId) est nécessaire
+        // à /Seasons, pas la réponse de fetchItem. Lancer les deux requêtes
+        // en parallèle économise un aller-retour complet sur le chemin du
+        // rideau (gate Saisons, seasonsStrictLoading). Le garde seq de
+        // fetchSeasons() protège déjà une réponse tardive d'une génération
+        // précédente.
+        if (!seasonsFetched && !seasonsFetchInFlight)
+            fetchSeasons()
         _useWarmDetailSnapshot();
         _fetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, itemId,
             function(res){
                 if (t!==_fetchToken) return;
                 _fetchHandle=null;
                 item = res;
+                DevLog.log("FICHE2", "item serie dt=" + (Date.now() - _ficheT0));
                 warmSnapshotVisible=false;
                 _warmDetailSnapshot=null;
                 _refreshActionButtonStates();
@@ -1726,7 +1821,16 @@ FocusScope {
                 seasonsHydrated=false;
                 _syncPosterSources();
                 _updatePosterGate();
-                bgUpdateTimer.restart();
+                // F2 : au premier affichage, ne pas attendre les 320 ms du
+                // debounce pour lancer la requête du backdrop. Le timer reste
+                // utile pour les rafraîchissements suivants (retour Player,
+                // changement d'item sur la même instance de page).
+                backdrop.updateBackdropNow();
+                // F3 : fetchSeasons() est désormais lancé au début de
+                // fetchItemIfReady(), en parallèle de cette requête ; ne pas
+                // le relancer ici sauf s'il n'a jamais démarré (contexte
+                // invalide entre-temps, ou item rafraîchi sans passer par
+                // fetchItemIfReady()).
                 if (!seasonsFetched && !seasonsFetchInFlight)
                     fetchSeasons()
                 serverResponseSlow=false;
@@ -1771,6 +1875,8 @@ FocusScope {
         fetchDebounce.restart()
     }
     Component.onCompleted: {
+        _ficheT0 = Date.now();
+        DevLog.log("FICHE1", "onCompleted serie dt=0");
         _hydrateSensitiveContextFromShared();
         _consumePersonReturnRefreshMarker();
         // L'hydratation ci-dessus peut avoir déclenché plusieurs onXChanged et
@@ -1850,16 +1956,14 @@ FocusScope {
             property int loadToken: 0
             onStatusChanged: {
                 if (loadToken !== backdrop._token) return;
-                if (status===Image.Ready) { backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=0.90; gateBGReady=true; }
-                else if (status===Image.Error) { backdrop.loadingFull=""; opacity=0.0; gateBGReady=true; }
+                if (status===Image.Ready) {
+                    backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=bgOpacity; gateBGReady=true;
+                    DevLog.log("FICHE4", "bg-ready serie dt=" + (Date.now() - _ficheT0));
+                } else if (status===Image.Error) {
+                    backdrop.loadingFull=""; opacity=0.0; gateBGReady=true;
+                    DevLog.log("FICHE4", "bg-error serie dt=" + (Date.now() - _ficheT0));
+                }
             }
-        }
-        Rectangle {
-            anchors.fill: bgImg
-            z: bgImg.z + 1
-            color: "#000000"
-            opacity: bgDarken
-            visible: (bgImg.source && ("" + bgImg.source).length > 0) && bgDarken > 0.001
         }
         function computeFullUrl(){
             return item ? Jellyfin.itemBackdropOrPrimaryUrl(serverUrl, item, {
@@ -1882,7 +1986,10 @@ FocusScope {
             _token += 1;
             bgImg.loadToken = _token;
             gateBGReady=false;
-            if (String(bgImg.source || "") !== String(ful || "")) bgImg.source=ful;
+            if (String(bgImg.source || "") !== String(ful || "")) {
+                bgImg.source=ful;
+                DevLog.log("FICHE3", "bg-src serie dt=" + (Date.now() - _ficheT0) + " " + DevLog.maskUrl(ful));
+            }
             _updateBGGate();
         }
     }
@@ -2504,6 +2611,10 @@ FocusScope {
                                     anchors.verticalCenterOffset: tunePosterLogoShiftY
                                     width: parent.width*0.90
                                     height: parent.height*0.90
+                                    // F5 : borne le décodage à la taille réellement demandée
+                                    // au serveur, au lieu de décoder le PNG à sa taille native.
+                                    sourceSize.width: _logoReqSize.width
+                                    sourceSize.height: _logoReqSize.height
                                     asynchronous: true
                                     cache: true
                                     mipmap: false
@@ -2697,6 +2808,12 @@ FocusScope {
             _schedulePokeRestore();
             if (_playerNextUpRestorePending) _schedulePlayerNextUpRestore(24);
         }
+        // F1 : une requête NextUp terminée SANS contenu (série entièrement
+        // vue) ne déclenche jamais onHasContentChanged (hasContent reste à
+        // false) ni de hauteur > 0. Sans ce relais, seul le timeout de
+        // secours (2600 ms) libérait la garde. DetailGatePolicy.nextUpGateReleased()
+        // couvre ce cas dès que NextUpBlock.ready passe à true.
+        onReadyChanged: _updateExtendedSectionGates()
         onCurrentIndexChanged: { requestSaveFocusSnapshot(); _updateNextUpMeta(); }
         onActiveFocusChanged: {
             if (target && target.activeFocus) {
@@ -2908,7 +3025,7 @@ FocusScope {
         if (!hasItem) return;
         lastFocusBeforeOverlay=currentFocus;
         overlayMode="poster";
-        overlayData={ posterUrl: effectivePosterUrl, posterMaxW: posterMaxW, posterMaxH: posterMaxH };
+        overlayData={ posterUrl: effectivePosterOverlayUrl, posterMaxW: posterMaxW, posterMaxH: posterMaxH };
     }
     function _overviewReaderImageUrl(){
         return item ? Jellyfin.itemBackdropOrPrimaryUrl(serverUrl, item, {
@@ -2928,7 +3045,7 @@ FocusScope {
             readerStyle: "media",
             title: itemTitle || "Résumé",
             meta: meta.join("  •  "),
-            posterUrl: _overviewReaderImageUrl() || seriesCoverUrl || effectivePosterUrl,
+            posterUrl: _overviewReaderImageUrl() || seriesCoverUrl || effectivePosterOverlayUrl,
             overview: item.Overview || "",
             posterMaxW: posterMaxW,
             posterMaxH: posterMaxH

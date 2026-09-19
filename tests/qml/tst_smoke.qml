@@ -13,6 +13,12 @@ import "../../qml/components" as Components
 TestCase {
     id: testCase
     name: "Smoke"
+    // test_lightweightSlowsTheStep observe le Timer interne sur la durée
+    // réelle (wait()) : sans fenêtre affichée, rien ne garantit qu'il tourne.
+    when: windowShown
+    width: 200
+    height: 200
+    visible: true
 
     Component {
         id: loaderComponent
@@ -36,5 +42,31 @@ TestCase {
 
         compare(dots.dotCount, 20);
         compare(dots.litCount, 0);
+    }
+
+    // F3 (audit shell) : lightweight ralentit le pas (~110 ms) pour le
+    // rideau global de page, par défaut désactivé pour les loaders locaux.
+    function test_lightweightDefaultsFalse() {
+        var dots = createTemporaryObject(loaderComponent, testCase);
+        compare(dots.lightweight, false);
+    }
+
+    function test_lightweightSlowsTheStep() {
+        var fast = createTemporaryObject(loaderComponent, testCase);
+        var slow = createTemporaryObject(loaderComponent, testCase, { lightweight: true });
+
+        var fastTicks = 0, slowTicks = 0;
+        fast.litCountChanged.connect(function() { fastTicks++; });
+        slow.litCountChanged.connect(function() { slowTicks++; });
+
+        // Pas par défaut ≈ 64 ms (900 / 14), pas lightweight fixé à 110 ms :
+        // sur une même fenêtre, le loader par défaut doit avancer nettement
+        // plus vite.
+        wait(400);
+
+        verify(slowTicks >= 1, "le loader lightweight doit tout de même avancer");
+        verify(fastTicks > slowTicks,
+               "lightweight doit ralentir sensiblement le pas (fast=" + fastTicks +
+               " slow=" + slowTicks + ")");
     }
 }
