@@ -11,6 +11,7 @@ import "." as Pages
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/UserStore.js" as UserStore
+import "../js/DevLog.js" as DevLog
 Item {
     id: moviepage
     width: parent ? parent.width : 1920
@@ -616,7 +617,15 @@ Item {
         var result = MediaCatalog.browserSortedWindow(
                     _rawFolderItems || [], sortMode, serverSortedPage === true,
                     keepId, grid ? grid.currentIndex : -1, resetFirst)
+        var gridT0 = Date.now()
         folderItems = result.items || []
+        if (DevLog.ENABLED) {
+            var gridItemCount = folderItems.length
+            Qt.callLater(function() {
+                DevLog.log("GRID4", "folderItems affecté count=" + gridItemCount +
+                                    " dt=" + (Date.now() - gridT0))
+            })
+        }
 
         if (result.index >= 0) {
             grid.currentIndex = result.index
@@ -860,7 +869,9 @@ Item {
         try { restoreRevealTimer.stop() } catch(e) {}
     }
 
-    function _releaseFolderRestoreVisualLoading() {
+    function _releaseFolderRestoreVisualLoading(reason) {
+        DevLog.log("GRID6", "rideau levé raison=" + (reason || "inconnue") +
+                            " attempts=" + folderRestoreRevealAttempts)
         try { restoreRevealTimer.stop() } catch(e) {}
         folderRestoreVisualLoading = false
         folderRestoreVisualTargetIndex = -1
@@ -900,7 +911,7 @@ Item {
             if (visuallyReady) {
                 if (folderRestoreStableSinceMs <= 0) folderRestoreStableSinceMs = now
                 if ((now - folderRestoreStableSinceMs) >= folderRestoreVisualSettleMs) {
-                    _releaseFolderRestoreVisualLoading()
+                    _releaseFolderRestoreVisualLoading("settled")
                     return
                 }
             } else {
@@ -909,7 +920,7 @@ Item {
 
             // Garde-fou de 4,8 s maximum après positionnement final.
             if (folderRestoreRevealAttempts >= folderRestoreRevealMaxAttempts)
-                _releaseFolderRestoreVisualLoading()
+                _releaseFolderRestoreVisualLoading("timeout-guard")
         }
     }
 
@@ -927,7 +938,7 @@ Item {
                 return
             }
             _scheduleBackdropUpdate(false)
-            _releaseFolderRestoreVisualLoading()
+            _releaseFolderRestoreVisualLoading("empty-no-more")
             return
         }
 
@@ -971,6 +982,8 @@ Item {
         }
 
         folderRestoreVisualTargetIndex = grid.currentIndex
+        DevLog.log("GRID5", "restore index appliqué target=" + idx +
+                            " currentIndex=" + grid.currentIndex)
         restoreIndex = -1
         startIndex   = -1
         restoreY     = -1
@@ -1090,6 +1103,10 @@ Item {
                 fetchedOnce = true
 
                 var arr = (page && page.items) ? page.items : []
+                // Le payload de page ne porte pas la taille JSON brute (non
+                // disponible à cette couche) : seul le nombre d'items est journalisé.
+                DevLog.log("GRID3", "réponse items=" + arr.length + " start=" + start +
+                                    " prepend=" + !!prepend + " hasMore=" + !!(page && page.hasMore))
                 _appendWindowFolderItems(arr, start, prepend)
                 _refreshLibraryMediaMode()
 
@@ -1362,6 +1379,8 @@ Item {
         _hydrateSensitiveContextFromShared()
         if (!accessToken || !userId || !serverUrl || !folderId) return
 
+        DevLog.log("GRID2", "fetchFolder départ mode=" + normalizedLibraryMode +
+                            " pageSize=" + folderPageSize)
         _fetchToken++
         _restoreSortFromShared()
         _armFolderRestoreVisualLoading()
@@ -1385,7 +1404,8 @@ Item {
     }
 
     Component.onCompleted: {
-
+        DevLog.log("GRID1", "onCompleted mode=" + normalizedLibraryMode +
+                            " pageSize=" + folderPageSize)
         _hydrateSensitiveContextFromShared()
         ready = true
         scheduleFetchFolder()
