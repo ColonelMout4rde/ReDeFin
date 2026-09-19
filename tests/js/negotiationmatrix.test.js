@@ -30,7 +30,7 @@ const assert = require('node:assert/strict');
 const {
     V, A, S, AUDIO_VO_THEN_FRENCH, audio, source,
     play, decision, assertDecision, MANUAL_QUALITY_BITRATE,
-    SERVER, loadRouter,
+    SERVER, loadRouter, negotiate,
 } = require('./negotiationmatrixfixtures');
 
 const DEVICES = ['revolution', 'devialet'];
@@ -547,9 +547,23 @@ test('un média muet compatible reste en lecture directe statique', () => {
     }
 });
 
-test('DVDSub : le plafond de canaux annoncé doit respecter le profil de l\'appareil',
-    { todo: 'TranscodingMaxAudioChannels=8 est écrit en dur alors que la Révolution plafonne à 6' }, () => {
-        // JellyfinPlaybackCore.js:2045 -> `dvdAudioChannels || 8`.
-        const d = decision(play('revolution', 'auto', MEDIA.dvdSub));
-        assert.equal(d.maxAudioChannels, 6);
-    });
+test('DVDSub : le plafond de canaux annoncé respecte le profil de l\'appareil', () => {
+    // L'audio est copié : aucun plan ne fixe de nombre de canaux, c'est le
+    // MaxAudioChannels du profil envoyé à Jellyfin qui fait foi.
+    assert.equal(decision(play('revolution', 'auto', MEDIA.dvdSub)).maxAudioChannels, 6);
+    assert.equal(decision(play('devialet', 'auto', MEDIA.dvdSub)).maxAudioChannels, 8);
+    assert.equal(decision(play('core', 'auto', MEDIA.dvdSub)).maxAudioChannels, 8,
+        'sans policy matérielle, le Core neutre garde sa valeur historique');
+});
+
+test('DVDSub : le plafond stéréo prime sur celui de l\'appareil', () => {
+    // Réglage « Sortie audio » = Stéréo : 2 canaux, que la piste soit
+    // mixée par le serveur (5.1) ou déjà stéréo (donc copiée).
+    for (const device of DEVICES) {
+        assert.equal(decision(negotiate(device, MEDIA.dvdSub, {}, 'stereo')).maxAudioChannels, 2,
+            device + ' 5.1');
+        const stereoSrc = source('mkv', '/m/film.mkv', [V.h264, A.aac20, S.frDvdSub]);
+        assert.equal(decision(negotiate(device, stereoSrc, {}, 'stereo')).maxAudioChannels, 2,
+            device + ' 2.0');
+    }
+});

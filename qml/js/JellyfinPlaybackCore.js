@@ -239,6 +239,19 @@ function _capAudioChannelsForOutput(ctx, channels) {
     try { return AudioOutput.capChannels(_audioOutputMode(ctx), channels) } catch(e0) {}
     return channels
 }
+// Plafond de canaux à annoncer quand aucun plan audio n'en impose un : celui
+// du profil de l'appareil actif (6 sur Révolution, 8 sur Devialet), abaissé
+// par le mode stéréo. Sans policy matérielle, le Core neutre garde sa valeur
+// historique de 8, cohérente avec son propre DeviceProfile.
+function _defaultTranscodingMaxAudioChannels(ctx) {
+    var n = 0
+    try {
+        var prof = _policyBuildDeviceProfile("http")
+        if (prof) n = Number(prof.MaxAudioChannels)
+    } catch(e0) { n = 0 }
+    if (!isFinite(n) || n <= 0) n = 8
+    return _capAudioChannelsForOutput(ctx, n)
+}
 // Applique le plafond stéréo à un plan audio de transcodage déjà calculé :
 // la copie devient impossible pour une piste de plus de 2 canaux.
 function _audioOutputTranscodePlan(ctx, src, audioIndex, plan) {
@@ -2042,7 +2055,7 @@ function negotiatePlayback(ctx, onSuccess, onError) {
                     videoCodec: "h264", audioCodec: dvdAudioCodec || null,
                     videoBitrate: dvdVideoBitrate, maxWidth: dvdDims.width,
                     maxHeight: dvdDims.height, maxVideoBitDepth: 8,
-                    maxStreamingBitrate: REDEFIN_MAX_STREAMING_BITRATE, transcodingMaxAudioChannels: dvdAudioChannels || 8,
+                    maxStreamingBitrate: REDEFIN_MAX_STREAMING_BITRATE, transcodingMaxAudioChannels: dvdAudioChannels || _defaultTranscodingMaxAudioChannels(ctx),
                     audioChannels: dvdAudioChannels, audioBitrate: dvdAudioBitrate,
                     allowAudioStreamCopy: dvdAudioAllowCopy, allowVideoStreamCopy: false,
                     enableAutoStreamCopy: dvdAudioAllowCopy, enableDirectStream: false,
@@ -2488,7 +2501,7 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             h264VideoBitDepth: null, h264RangeType: null,
             h264Deinterlace: undefined, transcodingMaxAudioChannels: interlacedTsTranscodeActive
                                          ? tsAudioChannels : (dvdSubFileTranscodeActive
-                                            ? (dvdAudioChannels || 8) : (audioOnlyTranscodeActive
+                                            ? (dvdAudioChannels || _defaultTranscodingMaxAudioChannels(ctx)) : (audioOnlyTranscodeActive
                                                ? audioOnlyTranscodeChannels : (forceImageBurnIn && imageBurnAudioPlan
                                                   ? imageBurnAudioPlan.channels : (policyTranscodeAudioPlan ? policyTranscodeAudioPlan.channels : null)))),
             audioChannels: interlacedTsTranscodeActive ? tsAudioChannels
