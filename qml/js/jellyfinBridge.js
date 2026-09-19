@@ -689,8 +689,13 @@ function _apiGetFailCooldownMs(url, err) {
     url = _s(url);
     var c = _errCode(err, "");
     if (url.indexOf("/Items/Latest") < 0) return 0;
+    // 10 min pénalisait une rangée d'accueil bien après qu'une bibliothèque
+    // en panne (5xx passager, redémarrage du serveur...) soit redevenue
+    // saine ; 120 s protège toujours le serveur d'un martèlement en boucle
+    // sans faire disparaître la rangée pour le reste de la session
+    // (audit-reseau.md §2, "Les 10 min sont peut-être excessives").
     if (c === "http_500" || c === "http_502" || c === "http_503" || c === "http_504")
-        return 600000;
+        return 120000;
     if (c === "network_error" || c === "timeout")
         return 60000;
     return 0;
