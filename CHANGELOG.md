@@ -84,6 +84,49 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
     le flux.
   - Non concerné : mode Original, flux HLS.
 
+- **Vidéo réencodée pour rien quand seul le son est illisible (Révolution).**
+  En mode Automatique, une piste DTS, E-AC3 ou TrueHD faisait réencoder toute
+  la vidéo en H.264 sur le serveur, alors que le mode Original se contentait de
+  convertir le son. Une vidéo que la Révolution sait lire (H.264, 8 bits,
+  1080p au plus) est maintenant copiée telle quelle et seul l'audio est
+  converti en AC3 : démarrage plus rapide, image d'origine, serveur bien moins
+  sollicité. Tout motif vidéo (HEVC, 10 bits, 4K, AV1…), plus de 6 canaux ou
+  un débit imposé gardent le transcodage complet. *À confirmer sur boîtier.*
+- **Sous-titres ASS/SSA choisis sur Révolution.** Le profil envoyé à Jellyfin
+  ne les déclarait pas, ce qui lui faisait préparer une incrustation dans
+  l'image. Ils sont maintenant demandés embarqués dans le flux, comme les SRT.
+  *Affichage à confirmer sur boîtier.*
+- **Session perdue à cause d'un reverse proxy.** Une page d'erreur HTML ou une
+  réponse tronquée, renvoyée avec un statut 200, était prise pour un refus du
+  jeton : la session mémorisée était effacée et le mot de passe redemandé.
+  L'application affiche désormais « Serveur injoignable, réessayez. » et garde
+  la session.
+- **« Derniers ajouts » rechargés à chaque retour sur l'accueil.** Ces rangées
+  n'étaient gardées en mémoire que 2,5 s au lieu des 120 s prévues.
+- **Lecture invisible pour Jellyfin quand la durée du média est inconnue**
+  (direct, enregistrement en cours) : ni « en cours de lecture », ni point de
+  reprise, ni marquage « vu ». Les rapports de lecture partent maintenant dans
+  tous les cas.
+- **Avance rapide pendant un changement de piste.** Appuyer sur avancer ou
+  choisir un chapitre pendant que le flux se rouvre provoquait une seconde
+  réouverture complète, ou faisait repartir la lecture du début après un
+  « Reprendre ». La lecture vise maintenant directement la dernière position
+  demandée.
+- **Média sans piste audio à transcoder.** L'adresse de lecture demandait à la
+  fois un transcodage et le fichier brut ; Jellyfin aurait renvoyé l'original,
+  par exemple un HEVC 4K illisible sur Révolution.
+- **Déconnexion d'un profil conservé.** La session restait utilisable en
+  mémoire jusqu'à la fermeture de l'application.
+- **Nom du serveur remplacé par son adresse** (`192.168.x.y:8096`) dans la
+  liste des serveurs après la première connexion.
+- **Serveur en double selon la casse de l'adresse.** `HTTP://Serveur:8096` et
+  `http://serveur:8096` désignent maintenant le même serveur. Si l'adresse
+  avait été saisie avec des majuscules, le mot de passe est redemandé une fois.
+- Corrections sans effet visible attendu : un seul paramètre
+  d'authentification dans l'adresse de lecture, plafond de canaux audio aligné
+  sur le boîtier pour les DVD avec sous-titres image, profil matériel retiré
+  pour un modèle de boîtier inconnu.
+
 ### Propre à ce fork
 
 - Identité distincte du paquet : « ReDeFin-CM », identifiant `com.cm.redefin`.
