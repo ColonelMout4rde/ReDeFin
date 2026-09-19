@@ -411,9 +411,15 @@ function _revForceTranscode(ctx, src) {
     if (frameRate > 60) return true;
 
     if (_isRiskyVideoCodec(videoCodec)) return true;
-    if (_isRiskyAudioCodec(audioCodec)) return true;
 
     if (channels > 6) return true;
+
+    // Un codec audio non sûr ne justifie pas, à lui seul, de réencoder la
+    // vidéo : si le CE4100 sait décoder la vidéo telle quelle, la policy
+    // demande un transcodage AUDIO SEUL (requiresAudioOnlyTranscode) et le
+    // Core copie la vidéo. Même principe que la policy Devialet. Si la vidéo
+    // n'est de toute façon pas copiable, le transcodage complet reste dû.
+    if (_isRiskyAudioCodec(audioCodec)) return !_revVideoCopySafe(videoCodec);
 
     // Cas PGS Révolution : un MKV n'est plus, à lui seul, une raison de
     // réencoder la vidéo. Si les codecs réellement choisis sont copiables, on
@@ -429,6 +435,26 @@ function _revForceTranscode(ctx, src) {
     return false;
 }
 
+function _revAudioOnlyTranscode(ctx, src, audioIndex) {
+    if (!src) return false;
+
+    // Réservé aux sources dont la vidéo est lisible telle quelle : sinon c'est
+    // _revForceTranscode() qui tranche et la vidéo est réencodée.
+    if (_revRequiresHardVideoTranscode(ctx, src)) return false;
+
+    var v = Core._firstStream(src, "Video");
+    if (!_revVideoCopySafe(v && v.Codec)) return false;
+
+    var a = _audioStreamByIndexSafe(src, (typeof audioIndex === "number") ? audioIndex : -1);
+    // Au-delà de 6 canaux, _revForceTranscode() conserve le transcodage
+    // complet historique : ce cas ne passe pas par l'audio seul.
+    if (_num(a && a.Channels) > 6) return false;
+
+    // E-AC3/DD+, DTS, TrueHD, FLAC... : la conversion AC3 du Core suffit, la
+    // vidéo H.264/MPEG déjà compatible n'a pas à repasser par l'encodeur.
+    return _isRiskyAudioCodec(a && a.Codec);
+}
+
 function _policyObject() {
     return {
         policyId: REVOLUTION_POLICY_ID,
@@ -440,6 +466,7 @@ function _policyObject() {
         shouldForceTranscode: _revForceTranscode,
         shouldForceSubtitleEncode: _revPgsNeedsEncode,
         requiresHardVideoTranscode: _revRequiresHardVideoTranscode,
+        requiresAudioOnlyTranscode: _revAudioOnlyTranscode,
         preferredTranscodeProtocol: _revPreferredTranscodeProtocol,
         preferredTranscodeVideoCodec: _revPreferredTranscodeVideoCodec,
         preferredTranscodeDimensions: _revPreferredTranscodeDimensions,

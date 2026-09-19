@@ -170,19 +170,51 @@ test('TrueHD 5.1 : la Devialet ne réencode QUE l\'audio, vidéo copiée', () =>
     }
 });
 
-test('TrueHD 5.1 : en Automatique la Révolution réencode AUSSI la vidéo', () => {
-    // Caractérisation : la policy Révolution classe TrueHD parmi les codecs
-    // « risqués » dans shouldForceTranscode(), ce qui déclenche le transcodage
-    // de politique complet — voir les bugs suspectés en fin de fichier.
-    assertDecision(play('revolution', 'auto', MEDIA.trueHd51), Object.assign({
-        audioCopy: false, audioCodec: 'ac3', audioChannels: 6, audioBitrate: 640000,
+/** Transcodage AUDIO SEUL : la vidéo est copiée telle quelle. */
+const AUDIO_ONLY_AC3 = {
+    kind: 'http-transcode', protocol: 'progressive', container: 'mkv',
+    videoCopy: true, videoCodec: 'h264',
+    audioCopy: false, audioCodec: 'ac3', audioChannels: 6,
+    maxAudioChannels: 6, audioBitrate: 640000,
+    // Aucune contrainte de mise à l'échelle : la vidéo n'est pas touchée.
+    maxWidth: 0, maxHeight: 0,
+};
+
+test('TrueHD 5.1 : la Devialet ne réencode QUE l\'audio, vidéo copiée', () => {
+    for (const mode of ['auto', 'original']) {
+        assertDecision(play('devialet', mode, MEDIA.trueHd51),
+            Object.assign({ audioIndex: 1 }, AUDIO_ONLY_AC3), mode);
+    }
+});
+
+test('TrueHD / DTS / E-AC3 5.1 : la Révolution ne réencode QUE l\'audio', () => {
+    // La vidéo H.264 8 bits 1080p est décodable par le CE4100 : seul le son
+    // ne l'est pas, donc le serveur copie la vidéo et convertit l'audio en AC3.
+    for (const media of [MEDIA.trueHd51, MEDIA.dts51, MEDIA.eac351]) {
+        assertDecision(play('revolution', 'auto', media), AUDIO_ONLY_AC3);
+        assert.equal(play('revolution', 'auto', media).params.TranscodeReasons,
+            'AudioCodecNotSupported', 'le motif annoncé reste purement audio');
+    }
+});
+
+test('audio non sûr + vidéo incompatible : la Révolution réencode aussi la vidéo', () => {
+    // Le voisin à ne pas casser : dès qu'une raison VIDÉO existe (HEVC, 10
+    // bits, 4K, AV1, débit manuel, plus de 6 canaux), le transcodage complet
+    // borné 1080p reste dû.
+    const hevcDts = source('mkv', '/m/film.mkv', [V.hevcMain10, A.dts51]);
+    assertDecision(play('revolution', 'auto', hevcDts), Object.assign({
+        audioCopy: false, audioCodec: 'ac3', audioChannels: 6,
     }, REVOLUTION_H264_CEILING));
 
-    // En « Original », seule l'incompatibilité vidéo compterait : la vidéo est
-    // copiée et le transcodage se limite à l'audio.
-    assertDecision(play('revolution', 'original', MEDIA.trueHd51), {
-        kind: 'http-transcode', videoCopy: true, videoCodec: 'h264',
-        audioCopy: false, audioCodec: 'ac3', audioChannels: 6,
+    // DTS-HD 7.1 : plus de 6 canaux, la règle historique l'emporte.
+    assertDecision(play('revolution', 'auto', MEDIA.dtsHd8), Object.assign({
+        audioCopy: false, audioCodec: 'ac3', audioChannels: 6, maxAudioChannels: 6,
+    }, REVOLUTION_H264_CEILING));
+
+    // Un débit choisi à la main reste un transcodage vidéo explicite.
+    assertDecision(play('revolution', 'quality', MEDIA.dts51), {
+        kind: 'http-transcode', videoCopy: false, videoCodec: 'h264',
+        videoBitrate: MANUAL_QUALITY_BITRATE, audioCodec: 'ac3',
     });
 });
 
@@ -196,6 +228,20 @@ test('DTS / DTS-HD / E-AC3 : cible AC3 6 canaux sur Révolution, copie sur Devia
         // La Devialet accepte DTS et E-AC3 en lecture directe.
         assertDecision(play('devialet', 'auto', media), DIRECT_PLAY);
     }
+});
+
+test('audio non sûr : la piste choisie à la main décide, pas la première du fichier', () => {
+    // Index 1 = AC3 5.1 copiable, index 2 = DTS 5.1 non décodable.
+    const mixed = source('mkv', '/m/film.mkv', [
+        V.h264,
+        audio('ac3', 6, { Index: 1, Language: 'fra', IsDefault: true }),
+        audio('dts', 6, { Index: 2, Language: 'eng' }),
+    ]);
+    assertDecision(play('revolution', 'auto', mixed, { selectedAudioStream: 2 }),
+        Object.assign({ audioIndex: 2 }, AUDIO_ONLY_AC3), 'DTS choisi');
+    assertDecision(play('revolution', 'auto', mixed, { selectedAudioStream: 1 }), {
+        kind: 'http-remux', videoCopy: true, audioCopy: true, audioIndex: 1,
+    }, 'AC3 choisi');
 });
 
 test('DTS / E-AC3 : « Original » rend la main à l\'utilisateur, même sur Révolution', () => {

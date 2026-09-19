@@ -141,6 +141,20 @@ function _policyRequiresHardVideoTranscode(ctx, src) {
     // connue ici. Les policies materiel peuvent declarer une liste plus large.
     return _isAv1Source(src)
 }
+function _policyRequiresAudioOnlyTranscode(ctx, src, audioIndex) {
+    // Incompatibilite AUDIO SEULE declaree par la policy materielle : la video
+    // reste copiee et seul le son est reencode. Les choix explicites de
+    // l'utilisateur (DirectPlay manuel, mode global Original) restent
+    // souverains, comme pour les autres regles de precaution.
+    if (!ctx || !src) return false
+    if (ctx.manualDirectPlayOverride === true) return false
+    if (_normalizePlaybackRuleMode(ctx.playbackRuleMode) === "directplay") return false
+    var p = _policy()
+    if (p && typeof p.requiresAudioOnlyTranscode === "function") {
+        try { return !!p.requiresAudioOnlyTranscode(ctx, src, audioIndex) } catch(e) {}
+    }
+    return false
+}
 function _policyTranscodeVideoCodecHint(ctx, src) {
     if (ctx && ctx.forceVideoTranscodeCodec) return _s(ctx.forceVideoTranscodeCodec).toLowerCase().trim()
     var p = _policy()
@@ -1837,13 +1851,14 @@ function negotiatePlayback(ctx, onSuccess, onError) {
         var mp4EditListTimestampRisk = _shouldRemuxMp4EditListTimestampRisk(ctx, src); var mp4TimedMetadataTrackRisk = _shouldRemuxMp4TimedMetadataTrackRisk(ctx, src); var mp4ContainerTimelineRisk = !!(mp4EditListTimestampRisk || mp4TimedMetadataTrackRisk); var singleAudioNoSubtitleDirectPlay = _isSingleAudioNoSubtitleDirectPlayCandidate(ctx, src)
         var remuxMkvHevcMain10 = _shouldServerRemuxHevcMain10(ctx, src); var autoFrenchAudioIndex = _autoFrenchAudioStreamIndex(ctx, src); var autoFrenchAudio = autoFrenchAudioIndex >= 0
         var plannedAudioStreamIndex = _plannedAutomaticAudioStreamIndex(ctx, src, autoFrenchAudioIndex); var forceTrueHd51AudioTranscode = _shouldForceTrueHd51AudioTranscode(ctx, src, plannedAudioStreamIndex)
+        var forcePolicyAudioOnlyTranscode = _policyRequiresAudioOnlyTranscode(ctx, src, plannedAudioStreamIndex)
         // Première estimation du downmix stéréo, sur la piste pressentie, afin
         // de sortir du DirectPlay statique comme le fait le TrueHD 5.1. Elle est
         // recalculée plus bas sur la piste réellement retenue.
         var stereoDownmixAudio = _shouldStereoDownmixAudio(ctx, src, plannedAudioStreamIndex)
         var preferredFrenchAudioNeedsServerSelection = _preferredFrenchAudioNeedsServerSelection(ctx, src); var defaultFrenchAudioNotFirst = _shouldRemuxDefaultFrenchAudioNotFirst(ctx, src)
         var dvdFolderMpegRemux = _shouldRemuxDvdFolderMpeg(ctx, src); var pinNoSubDefaultAudio = _shouldPinDefaultAudioForNoSubRemux(ctx, src, remuxNoSubs); var forceServerRemux = forceRemuxByPolicy ||
-            forceInterlacedTsTranscode || forceTrueHd51AudioTranscode || stereoDownmixAudio ||
+            forceInterlacedTsTranscode || forceTrueHd51AudioTranscode || forcePolicyAudioOnlyTranscode || stereoDownmixAudio ||
             remuxNoSubs || remuxMkvHevcMain10 ||
             mp4ContainerTimelineRisk || autoFrenchAudio ||
             preferredFrenchAudioNeedsServerSelection || preferredFrenchForcedSubtitleNeedsServerSelection ||
@@ -1916,12 +1931,12 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             preferredFrenchForcedSubtitleNeedsServerSelection || defaultFrenchAudioNotFirst ||
             dvdFolderMpegRemux || preferImageRemux ||
             forceImageBurnIn || forceDvdSubFileTranscode ||
-            forceInterlacedTsTranscode || forceTrueHd51AudioTranscode ||
+            forceInterlacedTsTranscode || forceTrueHd51AudioTranscode || forcePolicyAudioOnlyTranscode ||
             forceTranscodeByPolicy || forceServerRemux ||
             ctx.forceServerSeek === true || textSubtitleSelected ||
             serverExternalTextSubtitle || (imageSubtitleSelected === true) ||
             pinNoSubDefaultAudio
-        if (forceServerRemux || forceTranscodeByPolicy || forceDvdSubFileTranscode || forceInterlacedTsTranscode || forceTrueHd51AudioTranscode)
+        if (forceServerRemux || forceTranscodeByPolicy || forceDvdSubFileTranscode || forceInterlacedTsTranscode || forceTrueHd51AudioTranscode || forcePolicyAudioOnlyTranscode)
             wantsServerSelect = true
         var effectiveAudioStreamIndex = _effectiveAudioStreamForServer( ctx,
             src, imageSubtitleSelected,
@@ -1929,6 +1944,7 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             pinDefaultAudio, autoFrenchAudioIndex
         )
         forceTrueHd51AudioTranscode = _shouldForceTrueHd51AudioTranscode(ctx, src, effectiveAudioStreamIndex)
+        forcePolicyAudioOnlyTranscode = _policyRequiresAudioOnlyTranscode(ctx, src, effectiveAudioStreamIndex)
         // Piste réellement envoyée au serveur : soit l'index explicite/auto,
         // soit la piste par défaut que le serveur choisira. Le plan audio, et
         // donc la sélection automatique française, portent sur CELLE-LÀ.
@@ -1937,11 +1953,13 @@ function negotiatePlayback(ctx, onSuccess, onError) {
         var audioOutputPlan = _audioOutputPlan(ctx, src, audioOutputStreamIndex)
         stereoDownmixAudio = audioOutputPlan.downmix === true
         // Transcodage AUDIO SEUL, vidéo copiée : historiquement le TrueHD 5.1,
-        // désormais aussi le mixage stéréo demandé par l'utilisateur. Quand les
-        // deux s'appliquent, le downmix stéréo gagne (AAC 2.0).
-        var audioOnlyTranscodeNeeded = !!(forceTrueHd51AudioTranscode || stereoDownmixAudio)
+        // désormais aussi le mixage stéréo demandé par l'utilisateur et toute
+        // incompatibilité audio seule déclarée par la policy matérielle. Quand
+        // plusieurs s'appliquent, le downmix stéréo gagne (AAC 2.0).
+        var audioOnlyTranscodeNeeded = !!(forceTrueHd51AudioTranscode || forcePolicyAudioOnlyTranscode || stereoDownmixAudio)
         var audioOnlyTranscodeCodec = stereoDownmixAudio ? audioOutputPlan.codec
-                                    : (forceTrueHd51AudioTranscode ? "ac3" : null)
+                                    : (forceTrueHd51AudioTranscode ? "ac3"
+                                       : (forcePolicyAudioOnlyTranscode ? _policyTranscodeAudioCodecHint(ctx, src, audioOutputStreamIndex, false) : null))
 
         var tx3gSelected = _isTx3gSelected(src, ctx.selectedSubtitleStream)
         // Aucun overlay local ne doit être créé pendant une négociation serveur,
@@ -1982,8 +2000,8 @@ function negotiatePlayback(ctx, onSuccess, onError) {
 
         }
         var newUrl = ""; var includeTicks = !!ctx.preferTicks; var lastUsedTranscoding = false; var lastUsedDirectStream = false; var isServerRemux = false; var remuxAudioCodecLock = null; var fragileSeekRemux = false; var dvdDims = null
-        var dvdVideoBitrate = 0; var dvdTicks = 0; var dvdAudioCodec = null; var dvdAudioAllowCopy = true; var dvdAudioChannels = null; var dvdAudioBitrate = null; var imageBurnAudioPlan = null; var audioOnlyTranscodeChannels = stereoDownmixAudio ? audioOutputPlan.channels : (forceTrueHd51AudioTranscode ? 6 : null)
-        var audioOnlyTranscodeBitrate = stereoDownmixAudio ? audioOutputPlan.bitrate : (forceTrueHd51AudioTranscode ? 640000 : null); var audioOnlyTicks = 0; var audioOnlyTranscodeActive = false
+        var dvdVideoBitrate = 0; var dvdTicks = 0; var dvdAudioCodec = null; var dvdAudioAllowCopy = true; var dvdAudioChannels = null; var dvdAudioBitrate = null; var imageBurnAudioPlan = null; var audioOnlyTranscodeChannels = stereoDownmixAudio ? audioOutputPlan.channels : (forceTrueHd51AudioTranscode ? 6 : (forcePolicyAudioOnlyTranscode ? _audioChannelCountForStream(src, audioOutputStreamIndex) : null))
+        var audioOnlyTranscodeBitrate = stereoDownmixAudio ? audioOutputPlan.bitrate : ((forceTrueHd51AudioTranscode || forcePolicyAudioOnlyTranscode) ? 640000 : null); var audioOnlyTicks = 0; var audioOnlyTranscodeActive = false
         // Quand PlaybackInfo fournit déjà une TranscodingUrl HLS pour un
         // transcodage de politique (dont la qualité manuelle), cette URL est
         // désormais considérée comme la source de vérité. Le CoreUrl ne doit
