@@ -1282,9 +1282,14 @@ FocusScope {
                           (mode === 0 ? "&IncludeItemTypes=" + generalTypes : "")
                 return Jellyfin.searchHintsUrl(srv, common)
             }
+            // F11 (audit-grilles.md) : TotalRecordCount de ce chemin de repli
+            // (/Items) n'alimente que la propriété totalRecordCount, jamais
+            // lue ni affichée (le nombre montré à l'écran vient de
+            // results.length). Comme les deux autres routes de recherche
+            // (search-hints) ci-dessus, on ne demande plus ce compte exact.
             common = "Recursive=true&" + common +
                      "&ExcludeLocationTypes=Virtual&EnableUserData=false" +
-                     "&EnableTotalRecordCount=true&Fields=" + _searchEnc(fields) +
+                     "&EnableTotalRecordCount=false&Fields=" + _searchEnc(fields) +
                      (mode === 2 ? "&IncludeItemTypes=" + generalTypes : "")
             return Jellyfin.searchItemsUrl(srv, uid, common)
         }
