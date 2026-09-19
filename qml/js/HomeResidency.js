@@ -17,8 +17,8 @@
  *  - il est DÉTRUIT quand le lecteur s'ouvre (la mémoire va au lecteur, comme
  *    pour toute page) et aux frontières de session (splash, serveur, choix du
  *    profil) : un autre profil ne doit jamais hériter de cet accueil ;
- *  - une URL d'accueil différente de celle qui l'a construit (autre ageMax…)
- *    le fait reconstruire ;
+ *  - un accueil d'identité différente (autre ageMax, voir homeKey) est
+ *    reconstruit ; deux écritures de la même URL d'accueil ne le sont pas ;
  *  - une page vide (rechargement forcé transitoire de ShellPage) ne change rien.
  *
  * Aucun état global mutable : l'appelant conserve { source, page }.
@@ -38,6 +38,24 @@ function baseOf(url) {
 
 function isHomePage(page) {
     return baseOf(page).toLowerCase() === HOME_BASE;
+}
+
+/* Identité d'un accueil : seuls les paramètres qui changent ce qu'il affiche
+ * comptent. ShellPage navigue vers « HomePage.qml?ctx=1 » (login, grille) ou
+ * vers « HomePage.qml?ctx=1&ageMax=99 » (retour arrière sur pile vide) : c'est
+ * le même accueil, il ne doit pas être reconstruit. ageMax vaut 99 par défaut. */
+function homeKey(page) {
+    var p = _trim(page);
+    var q = p.indexOf("?");
+    var ageMax = "99";
+    if (q >= 0) {
+        var parts = p.substring(q + 1).split("&");
+        for (var i = 0; i < parts.length; ++i) {
+            var kv = parts[i].split("=");
+            if (kv[0] === "ageMax" && kv.length > 1 && kv[1].length) ageMax = kv[1];
+        }
+    }
+    return "ageMax=" + ageMax;
 }
 
 function createState() {
@@ -84,7 +102,7 @@ function plan(state, page, playerActive, enabled) {
     if (!curSource.length)
         return _result(base, nextPage, true, false, true, false);
 
-    if (curPage === nextPage)
+    if (homeKey(curPage) === homeKey(nextPage))
         return _result(curSource, curPage, true, false, false, true);
 
     // Autres paramètres : on reconstruit, en deux temps.

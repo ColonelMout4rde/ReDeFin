@@ -114,18 +114,32 @@ FocusScope {
                                       shell.playerActive,
                                       shell.keepHomeResident)
         shell._homeResidentState = { source: next.source, page: next.page }
-        if (!next.shown) shell._homeVisible = false
+        var wasVisible = shell._homeVisible
+        // _homeVisible est posé AVANT la source : un type QML en cache se
+        // construit de façon synchrone, et onLoaded s'exécute alors pendant
+        // l'affectation ci-dessous. Il doit déjà savoir que l'accueil est
+        // voulu, sinon il le prend pour une instance abandonnée (défaut
+        // constaté sur boîtier : accueil jamais initialisé, rideau infini).
+        shell._homeVisible = next.shown
         if (next.arm) shell._beginPageCurtainTransition()
         shell._homeResidentSource = next.source
         if (next.blankFirst) {
             Qt.callLater(shell._syncHomeResident)
             return
         }
-        if (!next.shown) return
-        var wasVisible = shell._homeVisible
-        shell._homeVisible = true
-        if (next.resumed && !wasVisible && homeLoader.status === Loader.Ready && homeLoader.item)
+        if (next.shown && next.resumed && !wasVisible
+                && homeLoader.status === Loader.Ready && homeLoader.item)
             shell._resumeResidentHome()
+    }
+
+    // Instance d'accueil dont plus personne ne veut (l'utilisateur est reparti
+    // pendant son chargement). Jamais depuis onLoaded directement : écrire la
+    // source du Loader pendant qu'il l'évalue est une boucle de binding, que
+    // Qt ignore en laissant Loader.source et l'état du shell désaccordés.
+    function _dropAbandonedResidentHome() {
+        if (shell._homeVisible) return
+        shell._homeResidentState = HomeResidency.createState()
+        shell._homeResidentSource = ""
     }
 
     // Réaffichage d'un accueil déjà construit : rien n'est rechargé. HomePage
@@ -2317,8 +2331,7 @@ FocusScope {
             // paramètres de currentPage ne sont plus ceux de l'accueil, on
             // ne garde pas une instance à moitié initialisée.
             if (!shell._homeVisible) {
-                shell._homeResidentState = HomeResidency.createState()
-                shell._homeResidentSource = ""
+                Qt.callLater(shell._dropAbandonedResidentHome)
                 return
             }
             shell._onPageLoaded(item, shell._pageLoadCurtainSeq)

@@ -122,3 +122,26 @@ test('câblage de ShellPage : second Loader caché ET désactivé, page active u
   // L'état de chargement et le focus suivent la page réellement à l'écran.
   assert.match(src, /readonly property bool _pageReportedLoading:\s*\{\s*var p = shell\._activePageItem/);
 });
+
+test('même accueil sous deux écritures d\'URL (avec ou sans ageMax par défaut) : réaffiché, jamais reconstruit', () => {
+  let s = run(H.createState(), 'HomePage.qml?ctx=1', false).state;
+  s = run(s, 'moviepage.qml?folderId=f', false).state;
+  const { r } = run(s, 'HomePage.qml?ctx=1&ageMax=99', false);
+  assert.strictEqual(r.resumed, true);
+  assert.strictEqual(r.blankFirst, false);
+  assert.strictEqual(r.source, 'HomePage.qml');
+  assert.strictEqual(H.homeKey('HomePage.qml?ctx=1'), H.homeKey('HomePage.qml?ageMax=99&ctx=1'));
+  assert.notStrictEqual(H.homeKey('HomePage.qml?ctx=1'), H.homeKey('HomePage.qml?ctx=1&ageMax=12'));
+});
+
+test('câblage : l\'accueil est déclaré voulu AVANT l\'affectation de la source (chargement synchrone d\'un type en cache)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'qml', 'pages', 'ShellPage.qml'), 'utf8');
+  const fn = src.slice(src.indexOf('function _syncHomeResident()'), src.indexOf('function _dropAbandonedResidentHome()'));
+  assert.ok(fn.indexOf('shell._homeVisible = next.shown') > 0);
+  assert.ok(fn.indexOf('shell._homeVisible = next.shown') < fn.indexOf('shell._homeResidentSource = next.source'));
+  // onLoaded n'écrit jamais la source du Loader pendant son évaluation.
+  const loaded = src.slice(src.indexOf('id: homeLoader'));
+  const onLoaded = loaded.slice(loaded.indexOf('onLoaded:'), loaded.indexOf('onLoaded:') + 600);
+  assert.doesNotMatch(onLoaded, /_homeResidentSource\s*=/);
+  assert.match(onLoaded, /Qt\.callLater\(shell\._dropAbandonedResidentHome\)/);
+});

@@ -471,6 +471,12 @@ TestCase {
         compare(shell._homeVisible, false);
         shell.playerActive = false;
         compare(shell._homeResidentSource, "HomePage.qml", "reconstruit au retour du lecteur");
+        // Le type HomePage est maintenant en cache : sa construction peut être
+        // synchrone. L'instance ne doit pas être prise pour abandonnée (défaut
+        // constaté sur boîtier : accueil jamais initialisé, rideau infini).
+        wait(400);
+        compare(shell._homeResidentSource, "HomePage.qml", "toujours là une fois chargé");
+        compare(shell._homeVisible, true);
 
         destroyApp(app);
     }
