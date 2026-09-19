@@ -708,11 +708,18 @@ function addOrUpdateServer(v) {
     var rec = _sanitizeServerEntry(v);
     if (!rec) return false;
 
+    // _sanitizeServerEntry() pré-remplit toujours le nom avec le repli
+    // « hôte:port ». Un appelant qui omet le nom (addOrUpdateUser sans
+    // serverName, _rememberServerUrl sans info serveur) ne doit pas écraser
+    // pour autant le libellé Jellyfin déjà mémorisé.
+    var hasProvidedName = !!String((v && (v.name || v.serverName)) || "");
+
     var list = _readServersArr();
     var found = false;
     for (var i = 0; i < list.length; i++) {
         if (list[i] && list[i].serverUrl === rec.serverUrl) {
-            list[i].name = rec.name || list[i].name || _serverLabelFromUrl(rec.serverUrl);
+            list[i].name = (hasProvidedName ? rec.name : "")
+                        || list[i].name || _serverLabelFromUrl(rec.serverUrl);
             list[i].version = rec.version || list[i].version || "";
             list[i].id = rec.id || list[i].id || "";
             list[i].url = rec.serverUrl;

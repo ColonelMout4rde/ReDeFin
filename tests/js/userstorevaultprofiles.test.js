@@ -268,16 +268,34 @@ test('un serveur sans nom prend son hôte comme libellé', () => {
     assert.equal(Store.listServers()[0].name, '192.168.51.10:8096');
 });
 
-test({ todo: 'BUG : addOrUpdateServer() remplace le nom mémorisé par le repli '
-           + '« hôte:port » dès qu\'un appel omet le nom (UserStore.js:715 avec '
-           + '_sanitizeServerEntry qui pré-remplit toujours name). Or '
-           + 'ShellPage._persistSession() et LoginPage._rememberServerUrl(url, null) '
-           + 'appellent justement sans nom : le libellé Jellyfin est perdu.' },
-'le nom d\'un serveur déjà connu survit à une mise à jour sans nom', () => {
+test('le nom d\'un serveur déjà connu survit à une mise à jour sans nom', () => {
     const { Store } = freshStore();
     Store.addOrUpdateServer({ serverUrl: SRV_A, name: 'Maison' });
+
+    // Les appelants qui n'ont pas l'info serveur sous la main : addOrUpdateUser
+    // sans serverName, et _rememberServerUrl(url, null) de LoginPage.
     Store.addOrUpdateServer({ serverUrl: SRV_A });
     assert.equal(Store.listServers()[0].name, 'Maison');
+    Store.addOrUpdateServer({ serverUrl: SRV_A, name: '' });
+    assert.equal(Store.listServers()[0].name, 'Maison');
+    Store.addOrUpdateUser({ serverUrl: SRV_A, userId: 'u1' });
+    assert.equal(Store.listServers()[0].name, 'Maison');
+
+    // Les autres métadonnées gardent le même contrat.
+    Store.addOrUpdateServer({ serverUrl: SRV_A, version: '10.9.0', id: 'srv-1' });
+    Store.addOrUpdateServer({ serverUrl: SRV_A });
+    assert.equal(Store.listServers()[0].version, '10.9.0');
+    assert.equal(Store.listServers()[0].id, 'srv-1');
+
+    // Un nom explicite, lui, remplace bien l'ancien, même le repli « hôte:port ».
+    Store.addOrUpdateServer({ serverUrl: SRV_A, serverName: 'Salon' });
+    assert.equal(Store.listServers()[0].name, 'Salon');
+    Store.addOrUpdateServer({ serverUrl: SRV_B });
+    assert.equal(Store.listServers().filter((s) => s.serverUrl === SRV_B)[0].name,
+                 '192.168.51.11:8096');
+    Store.addOrUpdateServer({ serverUrl: SRV_B, name: 'Grenier' });
+    assert.equal(Store.listServers().filter((s) => s.serverUrl === SRV_B)[0].name,
+                 'Grenier');
 });
 
 test('removeServer n\'efface que la fiche serveur, pas les profils', () => {
