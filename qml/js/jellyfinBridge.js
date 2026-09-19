@@ -1777,8 +1777,13 @@ function authenticate(serverUrl, username, password, onSuccess, onError) {
 function validateToken(serverUrl, accessToken, onSuccess, onError) {
     var url = _u(serverUrl, "/Users/Me");
     sendRequest("get", url, headersWithToken(accessToken), null, function (res) {
-        var j = jsonNormalize(res.json) || {};
-        if (j && (j.Id || j.Name))
+        var j = jsonNormalize(res && res.json);
+        // Un corps illisible (page d'erreur d'un reverse-proxy, réponse
+        // tronquée) ne prouve rien sur le token : le signaler comme
+        // invalid_token purgerait la session pour une panne de transport.
+        if (!j)
+            onError && onError("parse_error");
+        else if (j.Id || j.Name)
             onSuccess && onSuccess(j);
         else
             onError && onError("invalid_token");

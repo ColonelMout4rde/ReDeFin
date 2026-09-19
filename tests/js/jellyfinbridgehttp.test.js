@@ -27,6 +27,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBridge, recorder, queryOf, pathOf } = require('./bridgeharness');
+const { loadQmlJs } = require('./qmljs');
+
+// Le code d'erreur produit ici pilote la purge de session côté UserStore :
+// on vérifie les deux bouts de la chaîne dans le même test.
+const Store = loadQmlJs('qml/js/UserStore.js');
 
 const LAN = 'http://192.168.1.5:8096';
 const WAN = 'http://jellyfin.test:8096';
@@ -460,15 +465,33 @@ test('validateToken : une panne de transport ne doit pas ressembler à un token 
     }
 });
 
-test('validateToken : un corps illisible devrait rester une erreur de parsing',
-     { todo: 'un 200 au corps non-JSON renvoie invalid_token, ce que UserStore traduit par une purge du token : un reverse-proxy qui tronque une réponse déconnecte l\'utilisateur' },
-     () => {
-         const h = createBridge();
-         const r = recorder();
-         h.bridge.validateToken(LAN, TOKEN, r.onSuccess, r.onError);
-         h.last().respond({ status: 200, body: '<html>502 Bad Gateway</html>' });
-         assert.deepEqual(r.ko, ['parse_error']);
-     });
+test('validateToken : un corps illisible reste une erreur de parsing', () => {
+    // Page d'erreur HTML d'un reverse-proxy, corps tronqué, corps vide : le
+    // serveur n'a rien dit du token. Le traduire en invalid_token purgerait la
+    // session mémorisée et redemanderait le mot de passe pour une panne.
+    for (const [scenario, body] of [
+        ['page HTML', '<html>502 Bad Gateway</html>'],
+        ['JSON tronqué', '{"Id":"user-1"'],
+        ['corps vide', ''],
+        ['littéral null', 'null'],
+    ]) {
+        const h = createBridge();
+        const r = recorder();
+        h.bridge.validateToken(LAN, TOKEN, r.onSuccess, r.onError);
+        h.last().respond({ status: 200, body });
+        assert.deepEqual(r.ko, ['parse_error'], scenario);
+        assert.equal(Store.shouldDropStoredToken(r.ko[0]), false, scenario);
+    }
+
+    // Le voisin immédiat ne doit pas bouger : un JSON valide sans identité
+    // reste un refus du serveur, donc une purge.
+    const ko = createBridge();
+    const rKo = recorder();
+    ko.bridge.validateToken(LAN, TOKEN, rKo.onSuccess, rKo.onError);
+    ko.last().respondJson({});
+    assert.deepEqual(rKo.ko, ['invalid_token']);
+    assert.equal(Store.shouldDropStoredToken(rKo.ko[0]), true);
+});
 
 test('logout : un serveur qui refuse le token confirme quand même la déconnexion', () => {
     for (const status of [401, 403]) {
