@@ -452,9 +452,7 @@ test('restauration : un HEVC 10 bits en MKV n\'est tenté qu\'une fois puis aban
     assert.strictEqual(ctx.restartTimer.running, true);
 });
 
-test('restauration : une cible déplacée en cours de route est simplement reciblée',
-     { todo: 'BUG playerOverlayHelper.js:2302-2310 — _resetSeekRestoreGuard("target-changed") remet _seekRestoreReadyWallMs à 0 APRES qu\'il a été armé à `now` ; le test d\'échéance de la même passe compare alors now-0 et déclenche immédiatement l\'escalade (renégociation copy-remux) au lieu de simplement viser la nouvelle cible. Atteignable dès que _pendingSeekMs bouge pendant la boucle (seekToChapter:2841, seekBy/commitScrub sur seek en vol).' },
-     () => {
+test('restauration : une cible déplacée en cours de route est simplement reciblée', () => {
     const ctx = setup({}, { status: MP.Buffered, playbackState: MP.PausedState });
     armRestore(ctx, MIN_5);
     afterFirstAttempt(ctx, MIN_5);
@@ -469,6 +467,74 @@ test('restauration : une cible déplacée en cours de route est simplement recib
     assert.strictEqual(ctx.root._seekRestoreLastTargetMs, MIN_30);
     assert.strictEqual(ctx.root.negotiations.length, 0, 'aucune renégociation déclenchée');
     assert.strictEqual(ctx.root._pendingSeekMs, MIN_30, 'la cible reste à atteindre');
+});
+
+test('restauration : la cible déplacée réarme l\'échéance et oublie l\'ancien échantillon', () => {
+    // Le meilleur échantillon a été mesuré sur l'ancienne cible : le garder
+    // ferait accepter une position qui n'a plus rien à voir avec la nouvelle.
+    const ctx = setup({}, { status: MP.Buffered, playbackState: MP.PausedState });
+    armRestore(ctx, MIN_5);
+    afterFirstAttempt(ctx, MIN_5);
+    ignoreSeeks(ctx);
+    ctx.mp.position = MIN_5;                  // pile sur l'ancienne cible
+    tickRestore(ctx);
+    assert.strictEqual(ctx.root._seekRestoreAccepted, true, 'ancienne cible atteinte');
+
+    const ctx2 = setup({}, { status: MP.Buffered, playbackState: MP.PausedState });
+    armRestore(ctx2, MIN_5);
+    afterFirstAttempt(ctx2, MIN_5);
+    ignoreSeeks(ctx2);
+    ctx2.mp.position = MIN_5;
+    ctx2.root._seekRestoreBestDiffMs = 0;     // mémoire de l'ancienne cible
+    ctx2.root._seekRestoreBestLocalMs = MIN_5;
+    advance(ctx2.root.trackSwitchSeekMaxTotalMs - 100);
+    ctx2.root._pendingSeekMs = MIN_30;
+    tickRestore(ctx2);
+
+    assert.strictEqual(ctx2.root._seekRestoreAccepted, false, 'la nouvelle cible n\'est pas atteinte');
+    assert.strictEqual(ctx2.root._seekRestoreBestLocalMs, MIN_5, 'échantillon remesuré sur la nouvelle cible');
+    assert.strictEqual(ctx2.root._seekRestoreBestDiffMs, MIN_30 - MIN_5);
+    // L'échéance repart de la nouvelle cible : pas d'escalade immédiate.
+    assert.strictEqual(ctx2.root.negotiations.length, 0);
+    assert.deepStrictEqual(ctx2.root.seeks, [MIN_30], 'seek vers la nouvelle cible');
+});
+
+test('restauration : une cible qui bouge sans cesse finit par escalader', () => {
+    // Borne globale : le recentrage réarme l'échéance, mais pas le compteur de
+    // tentatives. Sans cela la boucle tournerait indéfiniment.
+    const ctx = setup({}, { status: MP.Buffered, playbackState: MP.PausedState });
+    armRestore(ctx, MIN_5);
+    afterFirstAttempt(ctx, MIN_5);
+    ignoreSeeks(ctx);
+
+    let target = MIN_5;
+    for (let i = 0; i < 50 && ctx.root.negotiations.length === 0; i++) {
+        target += 60000;
+        ctx.root._pendingSeekMs = target;
+        advance(ctx.root.trackSwitchSeekRetryDelayMs + 10);
+        tickRestore(ctx);
+    }
+
+    assert.strictEqual(ctx.root.negotiations.length, 1, 'la boucle ne tourne pas indéfiniment');
+    assert.strictEqual(ctx.root.negotiations[0].extra.forceJellyfinTranscodingUrlCopyRemux, true);
+    assert.ok(ctx.root.seeks.length <= ctx.root.trackSwitchSeekMaxAttempts,
+              'jamais plus de tentatives que le budget: ' + ctx.root.seeks.length);
+});
+
+test('restauration : une cible stable garde son échéance d\'origine', () => {
+    // Non-régression du voisin : sans déplacement de cible, le délai maximum
+    // court toujours depuis la première passe et finit par trancher.
+    const ctx = setup({}, { status: MP.Buffered, playbackState: MP.PausedState });
+    armRestore(ctx, MIN_30);
+    afterFirstAttempt(ctx, MIN_30);
+    ignoreSeeks(ctx);
+    ctx.mp.position = MIN_5;
+
+    tickRestore(ctx);
+    const armedAt = ctx.root._seekRestoreReadyWallMs;
+    advance(100);
+    tickRestore(ctx);
+    assert.strictEqual(ctx.root._seekRestoreReadyWallMs, armedAt, 'échéance non réarmée');
 });
 
 test('restauration : la validation est idempotente et remet la timeline à plat', () => {
