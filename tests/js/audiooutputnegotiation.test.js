@@ -25,8 +25,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadQmlJs } = require('./qmljs');
-
-const SERVER = 'http://192.168.51.42:8096';
+const { SERVER, negotiate } = require('./negotiationharness');
 
 /* ===== Sources de test ===== */
 
@@ -51,56 +50,8 @@ function source(video, streams, extra) {
 }
 
 /* ===== Harnais de négociation ===== */
-
-// Un routeur neuf par négociation : le Core garde un cache de négociation
-// (clé + résultat) au niveau module, qu'il ne faut pas partager entre cas.
-function negotiate(backend, src, extra, audioOutputMode) {
-    const Router = loadQmlJs('qml/js/JellyfinPlaybackRouter.js');
-    const bridge = Router.JFCore.CoreUrl.JellyfinBridge;
-
-    let playbackInfoBody = null;
-    bridge.sendRequestNoCache = (method, url, headers, payload, onSuccess) => {
-        playbackInfoBody = JSON.parse(payload);
-        onSuccess({ json: { PlaySessionId: 'PS1', MediaSources: [src] } });
-        return null;
-    };
-
-    Router.setDeviceMode(backend);
-
-    const ctx = Object.assign({
-        serverUrl: SERVER, accessToken: 'TOK',
-        itemId: 'IT1', userId: 'U1', startMs: 0,
-    }, extra || {});
-    if (audioOutputMode !== undefined) ctx.audioOutputMode = audioOutputMode;
-
-    let result = null;
-    let error = null;
-    Router.negotiatePlayback(ctx, (res) => { result = res; }, (err) => { error = err; });
-    assert.equal(error, null, 'la négociation ne doit pas échouer : ' + error);
-    assert.ok(result && result.url, 'une URL de lecture est attendue');
-
-    return {
-        url: String(result.url),
-        params: params(String(result.url)),
-        body: playbackInfoBody,
-        finalUrlKind: String(result.finalUrlKind),
-        stereoDownmix: result.audioOutputStereoDownmix === true,
-        sourceChannels: Number(result.audioOutputSourceChannels),
-        mode: String(result.audioOutputMode),
-    };
-}
-
-function params(url) {
-    const out = {};
-    const q = url.indexOf('?');
-    if (q < 0) return out;
-    for (const part of url.substring(q + 1).split('&')) {
-        const eq = part.indexOf('=');
-        if (eq < 0) continue;
-        out[decodeURIComponent(part.substring(0, eq))] = decodeURIComponent(part.substring(eq + 1));
-    }
-    return out;
-}
+// negotiate() vient de tests/js/negotiationharness.js : un routeur neuf par
+// négociation, transport HTTP remplacé par une réponse /PlaybackInfo figée.
 
 // Le plafond stéréo doit être annoncé au serveur pour TOUTES les pistes, y
 // compris celles qui ne seront pas mixées.
@@ -229,13 +180,16 @@ test('stéréo : une 5.1 est mixée par le serveur, vidéo copiée (Révolution,
 
 test('stéréo : le mode Original est concerné lui aussi', () => {
     const src = source(VIDEO_H264, [AUDIO_AC3_51]);
-    const neg = negotiate('revolution', src, { playbackRuleMode: 'directplay' }, 'stereo');
+    // Le mode se règle sur le routeur (options), pas dans le contexte : le
+    // routeur écrase ctx.playbackRuleMode avec son propre état.
+    const original = { playbackRuleMode: 'directplay' };
+    const neg = negotiate('revolution', src, {}, 'stereo', original);
 
     assertStereoDownmixUrl(neg);
     assert.equal(neg.params.AllowVideoStreamCopy, 'true');
 
     // Le même contenu en Original + multicanal reste en lecture directe.
-    const multi = negotiate('revolution', src, { playbackRuleMode: 'directplay' }, 'multichannel');
+    const multi = negotiate('revolution', src, {}, 'multichannel', original);
     assert.equal(multi.finalUrlKind, 'http-dp');
 });
 

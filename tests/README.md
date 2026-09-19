@@ -148,20 +148,30 @@ Voir `tests/js/qmljs.test.js` pour deux exemples complets : un module sans
 
 ### Rejouer une négociation de lecture complète
 
-`tests/js/audiooutputnegotiation.test.js` montre un motif plus large : le
-module chargé expose ses imports sous leur alias, donc on peut atteindre
+`tests/js/negotiationharness.js` factorise un motif plus large : le module
+chargé expose ses imports sous leur alias, donc on peut atteindre
 `Router.JFCore.CoreUrl.JellyfinBridge` et y remplacer `sendRequestNoCache()`
 par une réponse `/PlaybackInfo` figée. La négociation complète (policy
 matérielle comprise) se joue alors en mémoire, et le test observe à la fois le
 corps envoyé au serveur — profil d'appareil inclus — et l'URL finale destinée à
 QtMultimedia.
 
-Deux précautions : charger un routeur NEUF par scénario (le Core garde au
-niveau module un cache de négociation), et utiliser un hôte LAN
-(`http://192.168.x.y:8096`), sans quoi la validation de transport refuse l'URL.
-C'est ce qui permet de comparer une URL, caractère par caractère, à celle
-produite avant un changement : une non-régression réelle plutôt qu'une
-intention.
+```js
+const { negotiate } = require('./negotiationharness');
+const neg = negotiate('revolution', mediaSource, { selectedAudioStream: 2 }, 'stereo');
+// neg.url, neg.params, neg.body, neg.finalUrlKind, neg.result
+```
+
+Trois précautions, déjà prises par le harnais : charger un routeur NEUF par
+scénario (le Core garde au niveau module un cache de négociation), utiliser un
+hôte LAN (`http://192.168.x.y:8096`), sans quoi la validation de transport
+refuse l'URL, et régler le mode « Original » par `options.playbackRuleMode`
+puisque le routeur écrase `ctx.playbackRuleMode` avec son propre état. C'est ce
+qui permet de comparer une URL, caractère par caractère, à celle produite avant
+un changement : une non-régression réelle plutôt qu'une intention.
+
+Utilisateur : `tests/js/audiooutputnegotiation.test.js` (réglage « Sortie
+audio »).
 
 Pour lancer uniquement les tests Node :
 
