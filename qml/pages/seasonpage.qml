@@ -5,6 +5,7 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/DevLog.js" as DevLog
+import "../js/SeasonRevealPolicy.js" as SeasonRevealPolicy
 FocusScope {
     id: seasonpage
     width: parent ? parent.width : 1280
@@ -907,20 +908,46 @@ FocusScope {
     Rectangle { anchors.fill: parent; color: "#000000"; z: -10000 }
     property bool isLoading: true
 
-    // Gate de révélation visuelle : les données et composants se préparent derrière
-    // le CircleDotsLoader. La page n'est révélée qu'une fois le fond, le logo,
-    // la rangée d'épisodes et les éléments différés stabilisés.
+    // Gate de révélation visuelle : les données et composants se préparent
+    // derrière le CircleDotsLoader. Décision produit (lot 2, BRIEF-COMMUN.md) :
+    // la page est révélée dès que la liste d'épisodes est posée, l'épisode
+    // cible sélectionné (garanti par isLoading, voir SeasonRevealPolicy.js) et
+    // le focus rendu (requestApplyFocus(), appelé par _releaseVisualReveal()
+    // au moment même où le rideau se lève). Logo, fond, affiches d'épisodes
+    // et fiche détaillée de l'épisode sélectionné arrivent ensuite, sous
+    // rideau levé : voir _visualAssetsSettled()/SeasonRevealPolicy.revealReady().
     property bool visualRevealPending: false
     property bool _visualRevealHasShown: false
     property bool _visualRevealReturnMode: false
     property bool _externalFocusWasLost: false
     property double _visualRevealStartedMs: 0
     property double _visualRevealSuppressReturnUntilMs: 0
-    property int visualRevealInitialMinMs: 680
+    // Ancien plancher : 680 ms, appliqué même une fois tout prêt, sans rapport
+    // avec un défaut fonctionnel. Aligné sur la fenêtre de stabilité de mise
+    // en page (SeasonRevealPolicy.LAYOUT_STABILITY_MS, <=150 ms). Retour
+    // arrière en une ligne : remonter cette valeur (et/ou la constante).
+    property int visualRevealInitialMinMs: SeasonRevealPolicy.LAYOUT_STABILITY_MS
     property int visualRevealReturnMinMs: 220
     property int visualRevealPollMs: 80
-    property int visualRevealSettleMs: 160
+    // 160 -> 80 ms (lot 2) : ce n'est plus qu'une re-confirmation de
+    // _visualAssetsSettled() (désormais légère, structurelle), pas une
+    // attente d'assets ; reste au-dessus du plancher Math.max(80, ...) du
+    // Timer pour absorber un flap transitoire du Loader de la rangée.
+    property int visualRevealSettleMs: 80
     property int visualRevealHardTimeoutMs: 3200
+    // Fenêtre de stabilité de mise en page unique (lot 2), remplace la chaîne
+    // settle/warmup/logo/bg/details précédente. Le temps qu'un Loader
+    // asynchrone (rangée d'épisodes) republie sa géométrie, pas plus.
+    property bool _revealLayoutStable: false
+    Timer {
+        id: revealLayoutStabilityTimer
+        interval: Math.max(0, SeasonRevealPolicy.LAYOUT_STABILITY_MS)
+        repeat: false
+        onTriggered: {
+            _revealLayoutStable = true;
+            _tickVisualReveal();
+        }
+    }
     readonly property bool loadingGateActive: !!(isLoading || visualRevealPending)
     readonly property bool shellLoading: loadingGateActive
     readonly property string shellLoadingError: loadingError || ""
@@ -957,10 +984,6 @@ FocusScope {
             }
         }
     }
-    function _visualImageSettled(img){
-        if (!img || !String(img.source || "").length) return true;
-        return img.status === Image.Ready || img.status === Image.Error;
-    }
     function _visualEpisodesRowSettled(){
         if (!episodes || !episodes.length) return true;
         var it = (episodesRowLoader.status === Loader.Ready) ? episodesRowLoader.item : null;
@@ -968,28 +991,32 @@ FocusScope {
         try { if (it.posterGateMax !== undefined && Number(it.posterGateMax) < 0) return false; } catch(e0) {}
         return true;
     }
-    function _visualDetailsSettled(){
-        if (!episodes || !episodes.length || !selectedEpisodeId) return true;
-        return !!(selectedDetails && String(selectedDetails.Id || "") === selectedEpisodeId);
-    }
+    // Décision produit (lot 2) : ne dépend plus du fond, du logo, du panneau
+    // d'actions ni de la fiche détaillée de l'épisode sélectionné (voir
+    // SeasonRevealPolicy.js pour le détail et la justification). Seuls
+    // isLoading, la première image peinte, la rangée d'épisodes et la
+    // fenêtre de stabilité de mise en page restent des conditions.
     function _visualAssetsSettled(){
-        if (disposed || isLoading || !postFirstFrame || layoutSettle || initialWarmup || !_visualEpisodesRowSettled()) return false;
-        if (_bgWantedUrl && bgDebounceTimer.running) return false;
-        if (_bgActiveUrl && !_visualImageSettled(blurredBG)) return false;
-        if (showSeriesLogo && seriesLogoBox.width >= seriesLogoMinW && (!_logoArmed || !_visualImageSettled(seriesLogoImage))) return false;
-        if (showActionPanel && actionCircles.visible && (!_actionsArmed || (actionButtonsLoader.active && actionButtonsLoader.status !== Loader.Ready))) return false;
-        return _visualDetailsSettled();
+        if (disposed) return false;
+        return SeasonRevealPolicy.revealReady({
+            isLoading: isLoading,
+            postFirstFrame: postFirstFrame,
+            episodesRowSettled: _visualEpisodesRowSettled(),
+            layoutStable: _revealLayoutStable
+        });
     }
     function _armVisualReveal(reason, returnMode){
         if (disposed) return;
         DevLog.log("SAISON5", "step=armVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         _visualRevealReturnMode = returnMode === true; _visualRevealStartedMs = Date.now(); visualRevealPending = true;
+        _revealLayoutStable = false; revealLayoutStabilityTimer.restart();
         visualRevealSettleTimer.stop(); visualRevealPollTimer.restart(); visualRevealHardTimer.restart();
     }
     function _releaseVisualReveal(reason){
         if (!visualRevealPending) return;
         DevLog.log("SAISON5", "step=releaseVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         visualRevealPollTimer.stop(); visualRevealSettleTimer.stop(); visualRevealHardTimer.stop();
+        revealLayoutStabilityTimer.stop();
         visualRevealPending = false; _visualRevealHasShown = true; _visualRevealReturnMode = false;
         _visualRevealSuppressReturnUntilMs = Date.now() + 900; _externalFocusWasLost = false;
         var suffix = "visualReveal:" + (reason || "ready");
@@ -1067,6 +1094,7 @@ FocusScope {
         _loadingStartedMs = Date.now(); emptyEpisodesGraceTimer.stop(); loadingError = "";
         visualRevealPending = false; _visualRevealReturnMode = false; _externalFocusWasLost = false;
         visualRevealPollTimer.stop(); visualRevealSettleTimer.stop(); visualRevealHardTimer.stop();
+        _revealLayoutStable = false; revealLayoutStabilityTimer.stop();
         idleFreezeTimer.stop(); settleTimer.stop(); posterWarmupTimer.stop(); logoArmTimer.stop();
         actionsArmTimer.stop(); detailsDebounceTimer.stop(); bgDebounceTimer.stop();
         guestPrefetchCheck.stop(); pinAfterNavTimer.stop();
