@@ -1264,9 +1264,12 @@ FocusScope {
         _maybeEndLoadingWithGate()
     }
     function _gateSatisfied(){
-        if (loadingError && loadingError.length) return true
-        if (heroImagesTimedOut) return true
-        return (heroBgDone && heroArtDone)
+        // Décision produit (audit-fiches.md, point 5) : le rideau ne doit
+        // plus attendre les images (backdrop, art). heroBgDone/heroArtDone/
+        // heroImagesTimedOut restent calculées (elles pilotaient déjà, via
+        // _updateHeroGate(), le seul fondu du backdrop/art, pas une hauteur
+        // ou un focus) mais ne conditionnent plus la fin de isLoading.
+        return true
     }
     function _maybeEndLoadingWithGate(){
         if (disposed || !isLoading || !_itemFetchedOnce || !_endRequested || !_gateSatisfied()) return
@@ -1333,7 +1336,10 @@ FocusScope {
         else loadingHardTimeout.stop()
     }
     function scheduleEndLoading(){ if (disposed || !_itemFetchedOnce) return; _endRequested = true; _updateHeroGate() }
-    Timer { id: layoutReadyTimer; interval: 320; repeat: false; onTriggered: gateLayoutReady = true }
+    // 320 -> 60 ms (point 5) : ce délai ne protège qu'une marge de sécurité
+    // de mise en page, pas le focus (gateLayoutReady ne gouverne que
+    // extendedLoading, voir plus haut).
+    Timer { id: layoutReadyTimer; interval: 60; repeat: false; onTriggered: gateLayoutReady = true }
     Timer { id: extendedLoadingTimeout; interval: 1900; repeat: false; onTriggered: _releaseExtendedGates() }
     function _resetExtendedGates(){
         gateCollectionItemsReady = false

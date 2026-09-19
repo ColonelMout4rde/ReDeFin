@@ -9,6 +9,7 @@ import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
 import "../js/PosterSizing.js" as PosterSizing
+import "../js/DetailGatePolicy.js" as DetailGatePolicy
 FocusScope {
     id: detailMoviePage
     width: 1280; height: 720; focus: true
@@ -388,7 +389,16 @@ FocusScope {
     property bool gateBGReady: false
     property bool serverResponseSlow: false
     // Une fiche chaude peut rester interactive pendant la révalidation réseau.
-    readonly property bool hardLoading: (fetchInFlight && !warmSnapshotVisible) || !gateMinDelay || !gateItemReady || !gatePosterReady || !gateBGReady
+    // Décision produit (audit-fiches.md, point 5) : le rideau dur n'attend
+    // plus le poster/logo ni le backdrop (gatePosterReady/gateBGReady restent
+    // calculées ci-dessous pour leurs propres fondus, voir _updatePosterGate()/
+    // _updateBGGate(), mais ne bloquent plus l'affichage de la fiche). Un
+    // placeholder de couleur et un fondu existent déjà sur ces images.
+    readonly property bool hardLoading: !DetailGatePolicy.pageCanReveal({
+        fetchInFlight: fetchInFlight && !warmSnapshotVisible,
+        itemReady: gateItemReady,
+        minDelayReady: gateMinDelay
+    })
     /* ===== Loading étendu semi-strict (hero + premières sections movie) =====
        On garde le CircleDotsLoader jusqu'à ce que le hero soit prêt ET que les blocs
        Cast / Similar soient au moins instanciés ou déclarés vides. Cast/Similar gardent
@@ -588,7 +598,10 @@ FocusScope {
         gateMinDelay = gateItemReady = gatePosterReady = gateBGReady = true
         _releaseExtendedGates()
     }
-    Timer { id: minLoadTimer; interval: 220; repeat: false; onTriggered: gateMinDelay = true }
+    // Plancher réduit à 0 (point 5) : rien d'autre que hardLoading ne dépend
+    // de gateMinDelay ; le Timer reste pour garder l'armement asynchrone
+    // (safeRestart), pas pour retarder le rideau.
+    Timer { id: minLoadTimer; interval: 0; repeat: false; onTriggered: gateMinDelay = true }
     Timer {
         id: gateTimeoutTimer
         interval: 1800; repeat: false
@@ -596,7 +609,10 @@ FocusScope {
         // le retour réel de Jellyfin. Cela évite une page partiellement vide/noire.
         onTriggered: { if (fetchInFlight) serverResponseSlow = true }
     }
-    Timer { id: layoutReadyTimer; interval: 320; repeat: false; onTriggered: gateLayoutReady = true }
+    // 320 -> 60 ms (point 5) : ce délai ne protège qu'une marge de sécurité
+    // de mise en page, pas le focus (gateLayoutReady ne gouverne que
+    // extendedLoading, voir plus haut).
+    Timer { id: layoutReadyTimer; interval: 60; repeat: false; onTriggered: gateLayoutReady = true }
     Timer { id: extendedLoadingTimeout; interval: 2600; repeat: false; onTriggered: _releaseExtendedGates() }
     Timer {
         id: detailReturnReleaseTimer

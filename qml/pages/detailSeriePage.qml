@@ -935,7 +935,16 @@ FocusScope {
     property bool gatePosterReady: false
     property bool gateBGReady: false
     property bool serverResponseSlow: false
-    readonly property bool hardLoading: (fetchInFlight && !warmSnapshotVisible) || !gateMinDelay || !gateItemReady || !gatePosterReady || !gateBGReady
+    // Décision produit (audit-fiches.md, point 5) : le rideau dur n'attend
+    // plus le poster/logo ni le backdrop (gatePosterReady/gateBGReady restent
+    // calculées ci-dessous pour leurs propres fondus, mais ne bloquent plus
+    // l'affichage de la fiche). Un placeholder de couleur et un fondu
+    // existent déjà sur ces images.
+    readonly property bool hardLoading: !DetailGatePolicy.pageCanReveal({
+        fetchInFlight: fetchInFlight && !warmSnapshotVisible,
+        itemReady: gateItemReady,
+        minDelayReady: gateMinDelay
+    })
     property bool uiReady: false
     property bool gateNextUpReady: false
     property bool gateSeasonsBlockReady: false
@@ -1075,7 +1084,10 @@ FocusScope {
         gateMinDelay=true; gateItemReady=true; gatePosterReady=true; gateBGReady=true;
         _releaseExtendedGates();
     }
-    Timer { id: minLoadTimer; interval: 220; repeat: false; onTriggered: gateMinDelay=true }
+    // Plancher réduit à 0 (point 5) : rien d'autre que hardLoading ne dépend
+    // de gateMinDelay ; le Timer reste pour garder l'armement asynchrone,
+    // pas pour retarder le rideau.
+    Timer { id: minLoadTimer; interval: 0; repeat: false; onTriggered: gateMinDelay=true }
     Timer {
         id: gateTimeoutTimer
         interval: 1800
@@ -1084,9 +1096,12 @@ FocusScope {
         // est lent : seul le callback Jellyfin peut libérer gateItemReady.
         onTriggered: { if (fetchInFlight) serverResponseSlow=true; }
     }
+    // 320 -> 60 ms (point 5) : ce délai ne protège qu'une marge de sécurité
+    // de mise en page, pas le focus (gateLayoutReady ne gouverne que
+    // extendedLoading, voir plus haut).
     Timer {
         id: layoutReadyTimer
-        interval: 320
+        interval: 60
         repeat: false
         onTriggered: gateLayoutReady = true
     }

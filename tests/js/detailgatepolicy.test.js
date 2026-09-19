@@ -73,3 +73,55 @@ test('contenu annoncé mais pas encore mesuré (hauteur encore à 0) : la garde 
         height: 0,
     }), false);
 });
+
+test('pageCanReveal() (décision produit, point 5) : ne dépend plus des images, seulement du réseau et du plancher de temps', () => {
+    const Policy = load();
+    // Toutes conditions réunies : le rideau dur peut se lever, sans savoir
+    // quoi que ce soit sur le poster/logo/backdrop.
+    assert.equal(Policy.pageCanReveal({
+        fetchInFlight: false,
+        itemReady: true,
+        minDelayReady: true,
+    }), true);
+});
+
+test('pageCanReveal() reste fermé pendant que le fetch réseau est en cours (sans snapshot chaud)', () => {
+    const Policy = load();
+    assert.equal(Policy.pageCanReveal({
+        fetchInFlight: true,
+        itemReady: false,
+        minDelayReady: true,
+    }), false);
+});
+
+test("pageCanReveal() reste fermé tant que l'item n'est pas arrivé", () => {
+    const Policy = load();
+    assert.equal(Policy.pageCanReveal({
+        fetchInFlight: false,
+        itemReady: false,
+        minDelayReady: true,
+    }), false);
+});
+
+test('pageCanReveal() reste fermé pendant le plancher anti-clignotement', () => {
+    const Policy = load();
+    assert.equal(Policy.pageCanReveal({
+        fetchInFlight: false,
+        itemReady: true,
+        minDelayReady: false,
+    }), false);
+});
+
+test('pageCanReveal() ne prend aucun paramètre image : un état sans clé poster/backdrop se lève quand même', () => {
+    const Policy = load();
+    // Reproduit exactement le nouveau contrat : avant le correctif, l'ancien
+    // hardLoading exigeait aussi gatePosterReady/gateBGReady. pageCanReveal()
+    // n'a même pas ces clés dans sa signature.
+    assert.equal(Policy.pageCanReveal({
+        fetchInFlight: false,
+        itemReady: true,
+        minDelayReady: true,
+        gatePosterReady: false,
+        gateBGReady: false,
+    }), true);
+});

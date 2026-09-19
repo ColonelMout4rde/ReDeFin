@@ -42,3 +42,32 @@ function nextUpGateReleased(state) {
     if (!state.hasContent) return true;
     return (state.height | 0) > 0;
 }
+
+/* ===== Décision produit : le rideau n'attend plus les images =====
+ *
+ * (audit-fiches.md, point 5) L'ancien principe upstream retenait le rideau
+ * « dur » (hardLoading côté film/série) jusqu'à ce que le poster/logo ET le
+ * backdrop soient chacun Ready ou Error. Un placeholder de couleur et un
+ * fondu existent déjà sur ces images : les faire arriver après le reste de
+ * la fiche n'est plus un défaut, c'est le nouveau principe produit.
+ *
+ * pageCanReveal() ne retient donc plus que le réseau (l'item lui-même) et
+ * un plancher de temps anti-clignotement, jamais l'état d'une image.
+ *
+ * @param {object} state
+ * @param {boolean} state.fetchInFlight requête réseau de l'item en cours,
+ *        sans snapshot chaud affichable pendant ce temps.
+ * @param {boolean} state.itemReady l'item est arrivé (callback fetch, ou
+ *        snapshot chaud appliqué).
+ * @param {boolean} state.minDelayReady le plancher de temps minimal
+ *        anti-clignotement est passé (peut être toujours true si la page
+ *        n'en a pas/plus).
+ * @returns {boolean} true si le rideau dur peut se lever.
+ */
+function pageCanReveal(state) {
+    state = state || {};
+    if (state.fetchInFlight) return false;
+    if (!state.itemReady) return false;
+    if (!state.minDelayReady) return false;
+    return true;
+}
