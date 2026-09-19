@@ -4,6 +4,7 @@ pragma Singleton
 import QtQuick 2.15
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/UserStore.js" as UserStore
+import "../js/AudioOutputPolicy.js" as AudioOutput
 
 QtObject {
     id: root
@@ -17,6 +18,9 @@ QtObject {
     // smart      : règles de sélection/remux ReDeFin.
     // directplay : priorité au fichier original, contraintes matérielles conservées.
     property string playbackMode: "smart"
+    // multichannel : comportement historique, jusqu'à 6 canaux demandés.
+    // stereo       : le serveur mixe les pistes multicanales en stéréo.
+    property string audioOutputMode: "multichannel"
 
     property bool _syncing: false
     property bool _syncScheduled: false
@@ -40,6 +44,14 @@ QtObject {
         var mode = String(value || "").toLowerCase().trim()
         if (mode === "directplay" || mode === "direct-play" || mode === "direct_play") return "directplay"
         return "smart"
+    }
+
+    function normalizeAudioOutputMode(value) {
+        try {
+            if (AudioOutput && typeof AudioOutput.normalizeMode === "function")
+                return AudioOutput.normalizeMode(value)
+        } catch(e0) {}
+        return "multichannel"
     }
 
     function _ensureStoreInitialized() {
@@ -75,9 +87,11 @@ QtObject {
         if (!_ctxOk()) return
         var clock = !!get("showClock", true)
         var mode = normalizePlaybackMode(get("playbackMode", "smart"))
+        var audio = normalizeAudioOutputMode(get("audioOutputMode", "multichannel"))
         _syncing = true
         if (showClock !== clock) showClock = clock
         if (playbackMode !== mode) playbackMode = mode
+        if (audioOutputMode !== audio) audioOutputMode = audio
         _syncing = false
     }
 
@@ -135,6 +149,7 @@ QtObject {
     function set(name, val) {
         if (!_ctxOk()) return
         if (name === "playbackMode") val = normalizePlaybackMode(val)
+        if (name === "audioOutputMode") val = normalizeAudioOutputMode(val)
         if (!_ensureUserStoreContext()) return
         try { UserStore.setUserPref(serverUrl, userId, name, val) } catch(e0) { return }
 
@@ -150,6 +165,13 @@ QtObject {
             if (playbackMode !== mode) {
                 _syncing = true
                 playbackMode = mode
+                _syncing = false
+            }
+        } else if (name === "audioOutputMode") {
+            var audio = normalizeAudioOutputMode(val)
+            if (audioOutputMode !== audio) {
+                _syncing = true
+                audioOutputMode = audio
                 _syncing = false
             }
         }
@@ -168,6 +190,17 @@ QtObject {
             _syncing = false
         }
         if (_ctxOk()) set("playbackMode", mode)
+    }
+
+    onAudioOutputModeChanged: {
+        if (_syncing) return
+        var audio = normalizeAudioOutputMode(audioOutputMode)
+        if (audioOutputMode !== audio) {
+            _syncing = true
+            audioOutputMode = audio
+            _syncing = false
+        }
+        if (_ctxOk()) set("audioOutputMode", audio)
     }
 
     onServerUrlChanged: _scheduleSync()

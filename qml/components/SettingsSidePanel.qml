@@ -37,6 +37,11 @@ FocusScope {
     /* === Option: Mode de lecture (Original / Intelligent) === */
     property string playbackMode: "smart"
 
+    /* === Option: Sortie audio (Multicanal / Stéréo) === */
+    property string audioOutputMode: "multichannel"
+    // Rangée d'où l'aide « i » a été ouverte, pour y rendre le focus.
+    property string _playbackInfoOriginRow: "playback"
+
     // Télécommande Freebox : la touche « i / Infos » du Player est remontée
     // par le runtime Freebox comme Qt.Key_Help (0x01000058 / 16777304).
     // Les autres variantes restent acceptées pour les autres Players et claviers.
@@ -81,7 +86,38 @@ FocusScope {
         _setPlaybackMode(panel.playbackMode === "directplay" ? "smart" : "directplay");
     }
 
+    function _syncAudioOutputModeFromSettings() {
+        var mode = "multichannel";
+        try {
+            if (Components.AppSettings && Components.AppSettings.audioOutputMode !== undefined)
+                mode = Components.AppSettings.normalizeAudioOutputMode(Components.AppSettings.audioOutputMode);
+        } catch (e) {}
+        if (panel.audioOutputMode !== mode)
+            panel.audioOutputMode = mode;
+    }
+
+    function _setAudioOutputMode(value) {
+        var mode = Components.AppSettings.normalizeAudioOutputMode(value);
+        if (panel.audioOutputMode !== mode)
+            panel.audioOutputMode = mode;
+        try {
+            if (Components.AppSettings) {
+                // Même contrat de persistance que le mode de lecture : on écrit
+                // explicitement, sans dépendre du seul handler du Singleton.
+                if (typeof Components.AppSettings.set === "function")
+                    Components.AppSettings.set("audioOutputMode", mode);
+                if (Components.AppSettings.audioOutputMode !== mode)
+                    Components.AppSettings.audioOutputMode = mode;
+            }
+        } catch (e) {}
+    }
+
+    function _toggleAudioOutputMode() {
+        _setAudioOutputMode(panel.audioOutputMode === "stereo" ? "multichannel" : "stereo");
+    }
+
     function _openPlaybackInfo() {
+        _playbackInfoOriginRow = audioOutputRow.activeFocus ? "audio" : "playback";
         _playbackInfoOpen = true;
         Qt.callLater(function() {
             playbackInfoDialog.forceActiveFocus();
@@ -92,7 +128,11 @@ FocusScope {
         if (!_playbackInfoOpen) return;
         _playbackInfoOpen = false;
         Qt.callLater(function() {
-            if (panel._open) playbackModeRow.forceActiveFocus();
+            if (!panel._open) return;
+            if (panel._playbackInfoOriginRow === "audio")
+                audioOutputRow.forceActiveFocus();
+            else
+                playbackModeRow.forceActiveFocus();
         });
     }
 
@@ -130,6 +170,7 @@ FocusScope {
     /* === Ouverture / fermeture === */
     function open() {
         _syncPlaybackModeFromSettings();
+        _syncAudioOutputModeFromSettings();
         _playbackInfoOpen = false;
         _playbackInfoKeyHeld = false;
         _open = true;
@@ -169,7 +210,8 @@ FocusScope {
     }
 
     Keys.onReleased: {
-        if ((panel._playbackInfoOpen || playbackModeRow.activeFocus) && panel._isPlaybackInfoKey(event))
+        if ((panel._playbackInfoOpen || playbackModeRow.activeFocus || audioOutputRow.activeFocus) &&
+                panel._isPlaybackInfoKey(event))
             panel._handlePlaybackInfoReleased(event);
     }
 
@@ -483,7 +525,7 @@ FocusScope {
                         clockRow.forceActiveFocus();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Down) {
-                        aboutTitle.forceActiveFocus();
+                        audioOutputRow.forceActiveFocus();
                         event.accepted = true;
                     }
                 }
@@ -504,6 +546,122 @@ FocusScope {
                 }
             }
 
+            /* Rangée: "Sortie audio" — Multicanal / Stéréo */
+            FocusScope {
+                id: audioOutputRow
+                width: parent.width
+                height: 58
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    radius: 12
+                    color: audioOutputRow.activeFocus ? "#1b2142" : "transparent"
+                    opacity: audioOutputRow.activeFocus ? 1.0 : 0.0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
+
+                Row {
+                    anchors.centerIn: parent
+                    height: parent.height
+                    spacing: 9
+
+                    Text {
+                        text: "Multicanal"
+                        color: panel.audioOutputMode === "multichannel" ? "#FFFFFF" : "#8EB9FF"
+                        font.pixelSize: 12
+                        font.bold: panel.audioOutputMode === "multichannel"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignRight
+                        width: 72
+                        height: parent.height
+                        elide: Text.ElideRight
+                    }
+
+                    Item {
+                        id: audioOutputSelector
+                        width: 68
+                        height: 30
+                        y: Math.round((parent.height - height) / 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: height / 2
+                            border.width: 1
+                            border.color: "#E6EEFF"
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#2F7CFF" }
+                                GradientStop { position: 1.0; color: "#7EC4FF" }
+                            }
+                        }
+
+                        Rectangle {
+                            id: audioOutputKnob
+                            width: 24
+                            height: 24
+                            radius: height / 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: panel.audioOutputMode === "stereo"
+                               ? (audioOutputSelector.width - width - 3) : 3
+                            color: "#FFFFFF"
+                            border.color: "#FFFFFF"
+                            border.width: 1
+                            Behavior on x {
+                                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Stéréo"
+                        color: panel.audioOutputMode === "stereo" ? "#FFFFFF" : "#8EB9FF"
+                        font.pixelSize: 12
+                        font.bold: panel.audioOutputMode === "stereo"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignLeft
+                        width: 108
+                        height: parent.height
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Keys.onPressed: {
+                    if (event.key === Qt.Key_Left) {
+                        panel._setAudioOutputMode("multichannel");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Right) {
+                        panel._setAudioOutputMode("stereo");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Select) {
+                        panel._toggleAudioOutputMode();
+                        event.accepted = true;
+                    } else if (panel._isPlaybackInfoKey(event)) {
+                        panel._handlePlaybackInfoPressed(event);
+                    } else if (event.key === Qt.Key_Up) {
+                        playbackModeRow.forceActiveFocus();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Down) {
+                        aboutTitle.forceActiveFocus();
+                        event.accepted = true;
+                    }
+                }
+
+                Keys.onReleased: {
+                    if (panel._isPlaybackInfoKey(event))
+                        panel._handlePlaybackInfoReleased(event);
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onEntered: audioOutputRow.forceActiveFocus()
+                    onClicked: {
+                        panel._setAudioOutputMode(mouse.x < width / 2 ? "multichannel" : "stereo");
+                        mouse.accepted = true;
+                    }
+                }
+            }
+
             Rectangle { width: parent.width; height: 2; color: "#e0d200" }
 
             /* ===== À propos ===== */
@@ -512,8 +670,8 @@ FocusScope {
                 width: parent.width
                 height: 28
                 Keys.onPressed: {
-                    if (event.key === Qt.Key_Up)  { playbackModeRow.forceActiveFocus(); event.accepted = true }
-                    else if (event.key === Qt.Key_Down) { playbackModeRow.forceActiveFocus(); event.accepted = true }
+                    if (event.key === Qt.Key_Up)  { audioOutputRow.forceActiveFocus(); event.accepted = true }
+                    else if (event.key === Qt.Key_Down) { audioOutputRow.forceActiveFocus(); event.accepted = true }
                 }
                 Text { text: "À propos"; color: "#cfd6ff"; font.pixelSize: 16; font.bold: true }
             }
@@ -557,7 +715,9 @@ FocusScope {
         Rectangle {
             id: playbackInfoCard
             width: Math.min(760, Math.max(620, panel.width * 0.44))
-            height: 430
+            // La carte accueille trois blocs d'aide : Intelligent, Original et
+            // Sortie audio. On la borne pour rester lisible en 720p.
+            height: Math.max(430, Math.min(580, panel.height - 60))
             anchors.centerIn: parent
             radius: 18
             color: "#11172D"
@@ -593,7 +753,7 @@ FocusScope {
                     }
 
                     Text {
-                        text: "Modes de lecture"
+                        text: "Lecture et sortie audio"
                         color: "#FFFFFF"
                         font.pixelSize: 23
                         font.bold: true
@@ -656,6 +816,31 @@ FocusScope {
                     anchors.top: originalModeTitle.bottom
                     anchors.topMargin: 8
                     text: "ReDeFin privilégie le fichier tel qu’il est stocké et neutralise les règles préventives qui auraient choisi un remux ou un transcodage pour contourner un risque, par exemple la présence de sous-titres DVDSub. Les incompatibilités matérielles réelles restent prioritaires : un codec vidéo non pris en charge, comme AV1 sur Freebox Devialet, sera toujours transcodé. La piste audio et les sous-titres dépendent davantage de l’ordre et des réglages du fichier."
+                    color: "#E8ECFF"
+                    font.pixelSize: 14
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                }
+
+                Text {
+                    id: audioOutputTitle
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: originalModeDescription.bottom
+                    anchors.topMargin: 14
+                    text: "Sortie audio : Stéréo"
+                    color: "#8EB9FF"
+                    font.pixelSize: 17
+                    font.bold: true
+                }
+
+                Text {
+                    id: audioOutputDescription
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: audioOutputTitle.bottom
+                    anchors.topMargin: 8
+                    text: "Les pistes 5.1 sont mixées en stéréo par le serveur, ce qui relève le volume des dialogues. Ce réglage s’applique aussi en mode Original : pour ces pistes la lecture directe n’est plus possible, la vidéo reste copiée sans réencodage quand elle est compatible. Les pistes déjà stéréo ne sont pas modifiées."
                     color: "#E8ECFF"
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap
