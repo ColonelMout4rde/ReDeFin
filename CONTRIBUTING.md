@@ -128,6 +128,12 @@ In short:
   loads the actual `qml/pages/LoginPage.qml`, injects a user model, and
   drives it with `keyPress` / `keyRelease`. Neutralise network access by
   leaving `serverUrl` empty and never assert on rendering.
+- **A whole playback negotiation can be replayed in Node**: a loaded module
+  exposes its imports under their alias, so a test can reach
+  `Router.JFCore.CoreUrl.JellyfinBridge` and swap `sendRequestNoCache()` for a
+  canned `/PlaybackInfo` answer, then assert on the device profile sent to the
+  server and on the final media URL. See
+  `tests/js/audiooutputnegotiation.test.js` and `tests/README.md`.
 - `tests/qml/stubs/` contains minimal stand-ins for modules that do not
   exist outside the Player (`fbx.system` with its `Device` singleton) or
   outside Qt 5 (`QtGraphicalEffects`). Extend them if a page you test uses
