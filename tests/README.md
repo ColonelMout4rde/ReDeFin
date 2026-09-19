@@ -170,8 +170,9 @@ puisque le routeur écrase `ctx.playbackRuleMode` avec son propre état. C'est c
 qui permet de comparer une URL, caractère par caractère, à celle produite avant
 un changement : une non-régression réelle plutôt qu'une intention.
 
-Utilisateur : `tests/js/audiooutputnegotiation.test.js` (réglage « Sortie
-audio »).
+Utilisateurs : `tests/js/audiooutputnegotiation.test.js` (réglage « Sortie
+audio ») et `tests/js/forcedsubtitlecarry.test.js` (réinjection du sous-titre
+forcé français dans un flux serveur).
 
 Pour lancer uniquement les tests Node :
 

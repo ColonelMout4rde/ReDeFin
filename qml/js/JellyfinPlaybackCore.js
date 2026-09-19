@@ -2,6 +2,7 @@
 .import "JellyfinPlaybackCoreUrl.js" as CoreUrl
 .import "clientId.js" as ClientId
 .import "AudioOutputPolicy.js" as AudioOutput
+.import "ForcedSubtitlePolicy.js" as ForcedSubs
 .import "DevLog.js" as DevLog
 // ReDeFin playback policy: VFF priority, dormant subtitle safety, VO + French full auto-remux, TrueHD 5.1 audio-only transcoding and global high-quality DVDSub transcoding.
 // Text subtitles: local QML overlay is reserved for pure DirectPlay. Server-side modes use server-managed Embed by default; burn-in remains an explicit fallback.
@@ -1861,15 +1862,41 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             }
         }
         var safeFrenchForcedSubStream = _subtitleStreamByIndex(src, safeFrenchForcedSubIndex); var safeFrenchForcedSubIsText = _isSafeFrenchForcedTextSubtitle(safeFrenchForcedSubStream)
-        var carrySafeFrenchForcedSubtitle = !!( _smartPlaybackRulesEnabled(ctx) && forceServerRemux &&
-            safeFrenchForcedSubIndex >= 0 && safeFrenchForcedSubIsText &&
-            !ctx.useLocalSubs && !(typeof ctx.selectedSubtitleStream === "number" && ctx.selectedSubtitleStream >= 0) &&
-            !forceImageBurnIn && !preferImageRemux &&
-            !textSubtitleSelected && !serverExternalTextSubtitle &&
-            !hevcMain10Eac3InternalSubRisk )
+        // Réinjection du sous-titre FORCÉ français. Elle ne dépend plus du seul
+        // forceServerRemux : le même fichier perdait ses sous-titres forcés en
+        // transcodage de politique et les retrouvait après un changement de
+        // piste audio. Le critère est désormais « le flux final est un flux
+        // SERVEUR capable d'embarquer du texte » (remux, transcodage audio seul
+        // ou transcodage vidéo progressif), tous les autres garde-fous étant
+        // conservés. Le chemin réel n'est pas encore arrêté ici : les drapeaux
+        // sont mémorisés et la décision est réévaluée plus bas, une fois l'URL
+        // construite, pour écarter HLS et la TranscodingUrl Jellyfin conservée.
+        var forcedSubtitleStreamFlags = {
+            serverRemux: forceServerRemux, policyTranscode: forceTranscodeByPolicy,
+            policyTranscodeHls: policyTranscodeUseHls, serverSelect: wantsServerSelect,
+            mustHls: mustHls, dvdSubtitleTranscode: forceDvdSubFileTranscode,
+            hlsUrl: false, preserveTranscodingUrl: false
+        }
+        var forcedSubtitleCarry = ForcedSubs.decideCarry({
+            smartRules: _smartPlaybackRulesEnabled(ctx),
+            serverStream: ForcedSubs.isEmbeddableServerStream(forcedSubtitleStreamFlags),
+            forcedIndex: safeFrenchForcedSubIndex, forcedIsText: safeFrenchForcedSubIsText,
+            useLocalSubs: ctx.useLocalSubs === true,
+            explicitSubtitleIndex: (typeof ctx.selectedSubtitleStream === "number") ? ctx.selectedSubtitleStream : -1,
+            // « Aucun » explicite : playerOverlayHelper pose ce drapeau dès que
+            // l'utilisateur coupe les sous-titres, et il survit aux
+            // négociations suivantes (seek réseau, changement de piste, rejeu
+            // différé). Un choix explicite ne doit jamais être écrasé.
+            explicitSubtitlesOff: ctx.disableAutoVoFrenchFullSubtitle === true,
+            imageBurnIn: forceImageBurnIn, imageRemux: preferImageRemux,
+            textSubtitleSelected: textSubtitleSelected, serverExternalSubtitle: serverExternalTextSubtitle,
+            internalSubtitleRisk: hevcMain10Eac3InternalSubRisk
+        })
+        var carrySafeFrenchForcedSubtitle = forcedSubtitleCarry.carry; var forcedSubtitleCarryReason = forcedSubtitleCarry.reason
         var autoSubtitleEmbedIndex = carrySafeFrenchForcedSubtitle ? safeFrenchForcedSubIndex : -1
+        var subMethodBeforeForcedCarry = subMethodWanted
         if (carrySafeFrenchForcedSubtitle)
-            subMethodWanted = "Embed"
+            subMethodWanted = forcedSubtitleCarry.method
 
         var pinDefaultAudio = _hasExplicitAudio(ctx) ||
             autoFrenchAudio || preferredFrenchAudioNeedsServerSelection ||
@@ -2386,6 +2413,28 @@ function negotiatePlayback(ctx, onSuccess, onError) {
         var forcedContainer = mp4ContainerTimelineRisk ? "mkv" : (ctx.preferredContainer || _decidePreferredContainerWithSrc(ctx, src)); var looksLikeHls = (newUrl.indexOf(".m3u8") >= 0) || (newUrl.indexOf("/hls") >= 0)
         var policyTranscode = !!(forceTranscodeByPolicy && lastUsedTranscoding); var dvdSubFileTranscodeActive = !!(forceDvdSubFileTranscode && lastUsedTranscoding && !looksLikeHls)
         var interlacedTsTranscodeActive = !!(forceInterlacedTsTranscode && lastUsedTranscoding && !looksLikeHls)
+        // Décision finale de la réinjection du sous-titre forcé : le chemin
+        // réellement retenu est connu. Une URL HLS ne peut pas porter de texte
+        // embarqué, et une TranscodingUrl Jellyfin conservée n'est jamais
+        // réécrite par _forceQuery : l'injection n'y serait pas demandée.
+        if (carrySafeFrenchForcedSubtitle) {
+            forcedSubtitleStreamFlags.hlsUrl = looksLikeHls
+            forcedSubtitleStreamFlags.preserveTranscodingUrl = preserveJellyfinTranscodingUrl
+            if (!ForcedSubs.isEmbeddableServerStream(forcedSubtitleStreamFlags)) {
+                carrySafeFrenchForcedSubtitle = false
+                autoSubtitleEmbedIndex = -1
+                subMethodWanted = subMethodBeforeForcedCarry
+                forcedSubtitleCarryReason = looksLikeHls ? "hlsStream" : "jellyfinTranscodingUrl"
+            }
+        }
+        if (DevLog.ENABLED) {
+            DevLog.log("T18", "forced-sub carry=" + (carrySafeFrenchForcedSubtitle ? "1" : "0") +
+                " idx=" + (carrySafeFrenchForcedSubtitle ? safeFrenchForcedSubIndex : -1) +
+                " method=" + (carrySafeFrenchForcedSubtitle ? String(forcedSubtitleCarry.method) : "none") +
+                " reason=" + forcedSubtitleCarryReason +
+                " safeIdx=" + safeFrenchForcedSubIndex +
+                " text=" + (safeFrenchForcedSubIsText ? "1" : "0"))
+        }
         var policyTranscodeAudioCodecLock = policyTranscode ? _policyTranscodeAudioCodecHint(ctx, src, effectiveAudioStreamIndex, looksLikeHls) : null
         var policyTranscodeAllowAudioCopy = policyTranscode ? _policyTranscodeAllowAudioCopy(ctx, src, effectiveAudioStreamIndex, looksLikeHls) : true; var policyTranscodeAudioPlan = policyTranscode
                                      ? _audioOutputTranscodePlan(ctx, src, effectiveAudioStreamIndex,
@@ -2591,7 +2640,12 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             effectiveSubtitleStreamIndex = safeFrenchForcedSubIndex
             effectiveSubtitleMode = "embed"
             effectiveSubtitleReason = "safeFrenchForcedAutoRemux"
-        } else if (!isServerRemux && frenchDirectPlayGreenGate && safeFrenchForcedSubIndex >= 0) {
+        // Affichage natif de la piste forcée par QtMultimedia : cela n'a de sens
+        // que sur le FICHIER d'origine. Sur un transcodage ou un HLS sans
+        // sous-titre demandé, annoncer cette piste faisait cocher une ligne que
+        // le flux ne contient pas, y compris après un « Aucun » explicite.
+        } else if (!isServerRemux && !lastUsedTranscoding && !isHls &&
+                   frenchDirectPlayGreenGate && safeFrenchForcedSubIndex >= 0) {
             effectiveSubtitleStreamIndex = safeFrenchForcedSubIndex
             effectiveSubtitleMode = "directplay"
             effectiveSubtitleReason = "safeFrenchForcedDefault"
