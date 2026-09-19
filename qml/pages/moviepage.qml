@@ -484,16 +484,6 @@ Item {
         else _scheduleSelectedItemDetailFetch()
     }
 
-    /* ========= Utils visibilité ========= */
-    function indexVisible(idx) {
-        var cols = (grid && grid.columns > 0) ? grid.columns : 1
-        var row = Math.floor(idx / cols)
-        var rowTop = row * grid.cellHeight
-        var rowBottom = rowTop + grid.cellHeight
-        var margin = Math.max(360, grid.cellHeight * 1.5)
-        return !(rowBottom < (grid.contentY - margin) || rowTop > (grid.contentY + grid.height + margin))
-    }
-
     /* ========= Focus target ========= */
     function forceInitialFocus() {
         // Ne jamais exposer/focaliser provisoirement l'index 0 pendant une
@@ -2567,7 +2557,14 @@ Item {
             id: movieLibraryDelegate
             width: grid.cellWidth
             height: grid.cellHeight
-            visible: moviepage.indexVisible(index)
+            // L'ancien garde-fou recalculait une marge (contentY, cellHeight)
+            // par délégué ET par image pendant un glissement, alors que sa
+            // marge (≥360 px, voire ≥cellHeight*1,5) dépassait déjà le
+            // cacheBuffer de la GridView : tout délégué instancié par
+            // reuseItems/cacheBuffer était donc déjà considéré visible, et ce
+            // calcul ne faisait plus que payer son propre coût. La vraie
+            // limite de ce qui est créé/chargé reste cacheBuffer.
+            visible: true
             z: selected ? 1000 : 0
 
             property var itemData: modelData
