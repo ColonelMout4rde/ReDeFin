@@ -2536,6 +2536,36 @@ function fetchUserItem(serverUrl, accessToken, userId, itemId, onSuccess, onErro
     }, failDirect));
     return controller;
 }
+// F6/M2 (audit-grilles.md) : au repos du focus, une grille de bibliothèque
+// n'affiche dans son en-tête que des étiquettes techniques calculées par
+// MediaCatalog.movieStreamInfo() (MediaStreams : résolution, codecs, canaux,
+// langues) et MediaCatalog.movieBrowserTagChips() (Genres en plus des
+// étiquettes précédentes). fetchItem()/fetchUserItem() demandent la fiche
+// COMPLÈTE (/Items/{id} : People, MediaSources, Chapters, Overview...) pour
+// n'en lire que ces deux champs. Cette fonction ne demande que ce qui est
+// réellement lu, sur le même endpoint de liste que fetchMovieFolderItemsPage
+// (poids et forme de réponse déjà éprouvés), en gardant EnableImages=false
+// (aucune image n'est affichée par ce détail) et EnableTotalRecordCount=false
+// (un seul item attendu, le compteur est inutile).
+function fetchUserItemTechSummary(serverUrl, accessToken, userId, itemId, onSuccess, onError) {
+    if (!serverUrl || !accessToken || !userId || !itemId) {
+        onError && onError("missing_params");
+        return null;
+    }
+    var url = _u(serverUrl, "/Items?UserId=" + enc(userId) +
+        "&Ids=" + enc(itemId) +
+        "&Fields=MediaStreams,Genres" +
+        "&EnableImages=false&EnableTotalRecordCount=false");
+    return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
+        var j = jsonNormalize(res && res.json);
+        var items = j && j.Items ? j.Items : [];
+        var item = items && items.length ? items[0] : null;
+        if (item && item.Id) onSuccess && onSuccess(item);
+        else onError && onError("bad_response");
+    }, function(err) {
+        onError && onError(_errCode(err, "network_error"));
+    });
+}
 function fetchUserItemWithPublicFallback(serverUrl, accessToken, userId, itemId, onSuccess, onError) {
     itemId = _s(itemId);
     if (!itemId) {

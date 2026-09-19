@@ -1326,7 +1326,7 @@ Item {
     }
 
     function _fetchSelectedItemDetailForTags() {
-        if (!ready || loadingItems || !accessToken || !serverUrl) return
+        if (!ready || loadingItems || !accessToken || !serverUrl || !userId) return
         if (isGridInMotion) { selectedDetailFetchTimer.restart(); return }
         var it = _baseSelectedItem()
         if (!_itemNeedsMediaDetail(it)) return
@@ -1338,18 +1338,33 @@ Item {
         _detailFetchToken++
         var token = _detailFetchToken
         _detailFetchInFlightId = id
+        var onDetail = function(detail) {
+            if (token !== _detailFetchToken) return
+            _detailFetchHandle = null
+            if (_detailFetchInFlightId === id) _detailFetchInFlightId = ""
+            if (detail && detail.Id)
+                _storeItemDetailForTags(id, detail)
+        }
+        var onDetailError = function() {
+            if (token === _detailFetchToken) _detailFetchHandle = null
+            if (token === _detailFetchToken && _detailFetchInFlightId === id)
+                _detailFetchInFlightId = ""
+        }
         try {
-            _detailFetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, id, function(detail) {
-                if (token !== _detailFetchToken) return
-                _detailFetchHandle = null
-                if (_detailFetchInFlightId === id) _detailFetchInFlightId = ""
-                if (detail && detail.Id)
-                    _storeItemDetailForTags(id, detail)
-            }, function() {
-                if (token === _detailFetchToken) _detailFetchHandle = null
-                if (token === _detailFetchToken && _detailFetchInFlightId === id)
-                    _detailFetchInFlightId = ""
-            })
+            if (personalMode) {
+                // Le header personnel (MediaCatalog.personalMediaStreamInfo)
+                // lit aussi Width/Height/Container/Bitrate (dimensions photo) :
+                // hors du périmètre du résumé technique ci-dessous, on garde
+                // la fiche complète pour ce mode.
+                _detailFetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, id, onDetail, onDetailError)
+            } else {
+                // F6/M2 (audit-grilles.md) : l'en-tête films/séries n'affiche
+                // que des étiquettes techniques (MediaCatalog.movieStreamInfo
+                // lit MediaStreams, movieBrowserTagChips lit aussi Genres),
+                // pas la fiche complète (People, MediaSources, Chapters...)
+                // que fetchItem() demandait pour cet usage.
+                _detailFetchHandle = Jellyfin.fetchUserItemTechSummary(serverUrl, accessToken, userId, id, onDetail, onDetailError)
+            }
         } catch(e) {
             _detailFetchInFlightId = ""
         }
