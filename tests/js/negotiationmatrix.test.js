@@ -517,20 +517,35 @@ test('échec de /PlaybackInfo : repli DirectPlay sur Révolution, erreur ferme s
     assert.equal(results.devialet.err, 'server_pipeline_required');
 });
 
-/* ===== 10. Bugs suspectés (non figés) ===== */
+/* ===== 10. Garde-fous du pipeline serveur ===== */
 
-test('un média sans piste audio ne doit pas recevoir static=true sur un transcodage',
-    { todo: 'static=true est ajouté alors que l\'URL demande un transcodage H.264 complet' }, () => {
-        // JellyfinPlaybackCoreUrl.js:616 n'ajoute static=true que si aucune
-        // sélection serveur n'est demandée. Sans piste audio,
-        // effectiveAudioStreamIndex vaut -1 et aucun garde-fou ne joue : l'URL
-        // porte à la fois static=true et VideoCodec=h264/MaxWidth=1920.
-        const silent4k = source('mkv', '/m/clip.mkv', [V.hevc4k]);
-        const d = decision(play('revolution', 'auto', silent4k));
-        assert.equal(d.kind, 'http-transcode');
-        assert.equal(d.static, false,
-            'static=true dirait au serveur de renvoyer le 4K HEVC brut au CE4100');
-    });
+test('un média sans piste audio ne doit pas recevoir static=true sur un transcodage', () => {
+    // Sans piste audio, aucune sélection de piste n'est demandée au serveur :
+    // seul l'état « pipeline serveur » distingue encore un transcodage d'une
+    // lecture directe. static=true dirait au serveur de renvoyer le fichier
+    // brut, ici un 4K HEVC, à un CE4100.
+    const silent4k = source('mkv', '/m/clip.mkv', [V.hevc4k]);
+    const d = decision(play('revolution', 'auto', silent4k));
+    assert.equal(d.kind, 'http-transcode');
+    assert.equal(d.videoCodec, 'h264');
+    assert.equal(d.static, false);
+
+    // Même piège sur le second chemin sans sélection de piste : le TS
+    // entrelacé, désentrelacé et réencodé par le serveur.
+    const silentTs = source('ts', '/m/tv.ts', [V.h264Interlaced]);
+    const dts = decision(play('revolution', 'auto', silentTs));
+    assert.equal(dts.kind, 'http-transcode');
+    assert.equal(dts.static, false, 'TS entrelacé sans audio');
+});
+
+test('un média muet compatible reste en lecture directe statique', () => {
+    // Contre-épreuve du cas précédent : sans pipeline serveur, static=true
+    // reste indispensable (c'est lui qui évite le remux serveur inutile).
+    for (const device of DEVICES) {
+        assertDecision(play(device, 'auto', source('mp4', '/m/clip.mp4', [V.h264])),
+            DIRECT_PLAY, device + ' muet');
+    }
+});
 
 test('DVDSub : le plafond de canaux annoncé doit respecter le profil de l\'appareil',
     { todo: 'TranscodingMaxAudioChannels=8 est écrit en dur alors que la Révolution plafonne à 6' }, () => {

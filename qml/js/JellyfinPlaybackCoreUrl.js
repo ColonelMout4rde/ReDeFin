@@ -613,7 +613,12 @@ function _forceQuery(url, ctx, subMethodWanted, includeTicks) {
     var prefCont = ctx.preferredContainer || _decidePreferredContainer(ctx)
     if (!isHlsUrl && prefCont)
         p.Container = prefCont
-    if (!isHlsUrl && !_needsServerTrackSelection_ctx(ctx) && !(includeTicks && ctx.startMs > 0) && ctx.forceServerRemux !== true)
+    // static=true demande le FICHIER BRUT : il est incompatible avec tout
+    // pipeline serveur. La sélection de piste ne suffit pas à le détecter (un
+    // média sans piste audio n'en demande aucune), d'où le même jeu de
+    // drapeaux que PlaySessionId ci-dessus.
+    if (!isHlsUrl && !_needsServerTrackSelection_ctx(ctx) && !(includeTicks && ctx.startMs > 0) && ctx.forceServerRemux !== true &&
+            ctx.forcePolicyTranscode !== true && ctx.forceServerTranscode !== true && ctx.lastUsedTranscoding !== true)
         p.static = "true"
     var forced=_joinUrl(sp.base,p)
 
