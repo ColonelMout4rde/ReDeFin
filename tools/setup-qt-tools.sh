@@ -19,6 +19,10 @@
 #                        Par défaut : ~/.cache/redefin-qttools/venv
 #   REDEFIN_LIBFBXQML   Chemin du clone libfbxqml (voir fetch-libfbxqml.sh).
 #                        Par défaut : ~/.cache/redefin-qttools/libfbxqml
+#   REDEFIN_PYSIDE_VERSION  Version exacte de PySide6-Essentials à installer
+#                        (ex : 6.11.2). Par défaut : la plus récente. Fixée
+#                        par la CI pour qu'une nouvelle version de Qt ne
+#                        casse pas un build sans rapport.
 #
 set -euo pipefail
 
@@ -89,7 +93,12 @@ fi
 
 echo "-- Installation/mise à jour de PySide6-Essentials..."
 "${VENV_DIR}/bin/python3" -m pip install --upgrade pip --quiet
-"${VENV_DIR}/bin/python3" -m pip install --upgrade PySide6-Essentials --quiet
+if [ -n "${REDEFIN_PYSIDE_VERSION:-}" ]; then
+    echo "   version imposée : ${REDEFIN_PYSIDE_VERSION}"
+    "${VENV_DIR}/bin/python3" -m pip install "PySide6-Essentials==${REDEFIN_PYSIDE_VERSION}" --quiet
+else
+    "${VENV_DIR}/bin/python3" -m pip install --upgrade PySide6-Essentials --quiet
+fi
 
 if [ ! -x "${VENV_DIR}/bin/pyside6-qmllint" ]; then
     echo "Erreur : pyside6-qmllint est introuvable après installation." >&2
