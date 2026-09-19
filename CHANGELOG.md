@@ -91,7 +91,9 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
   1080p au plus) est maintenant copiée telle quelle et seul l'audio est
   converti en AC3 : démarrage plus rapide, image d'origine, serveur bien moins
   sollicité. Tout motif vidéo (HEVC, 10 bits, 4K, AV1…), plus de 6 canaux ou
-  un débit imposé gardent le transcodage complet. *À confirmer sur boîtier.*
+  un débit imposé gardent le transcodage complet. Validé sur Révolution en
+  sortie Stéréo (image fluide, son synchronisé, reprise et changement de piste
+  compris) ; la sortie Multicanal suit le même chemin mais n'a pas été essayée.
 - **Sous-titres ASS/SSA choisis sur Révolution.** Le profil envoyé à Jellyfin
   ne les déclarait pas, ce qui lui faisait préparer une incrustation dans
   l'image. Ils sont maintenant demandés embarqués dans le flux, comme les SRT.
