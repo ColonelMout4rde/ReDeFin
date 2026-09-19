@@ -160,6 +160,17 @@ Item {
     readonly property int  gridCellW: posterW + focusPad * 2
     readonly property int  gridCellH: posterH + focusPad + topPadFor(posterH)
 
+    // Marge de pré-création/pré-chargement de la GridView (F5, audit-grilles.md) :
+    // une rangée entière plutôt que 0,42 × la hauteur de la vue (~245 px, soit
+    // moins qu'une cellule d'environ 293 px). Avec l'ancienne valeur, la
+    // rangée suivante était créée PENDANT le glissement (7 délégués + 7
+    // images d'un coup) au lieu d'être prête à l'arrêt. Compromis mémoire
+    // assumé : une rangée de délégués/images supplémentaire reste toujours en
+    // dehors du viewport (RAM Révolution limitée) ; à revoir avec une mesure
+    // sur boîtier si la pagination par fenêtre glissante (folderWindowMaxItems)
+    // s'en trouve mise sous pression.
+    readonly property int  gridCacheBufferPx: gridCellH
+
     // ✅ TWEAK 2: qualité JPEG abaissée (URL unique)
     readonly property int jpgQltPosters: 82
     readonly property int posterHqQuality: 90
@@ -2439,7 +2450,7 @@ Item {
         // stratégie que SearchPage, cf. son ListView de résultats).
         highlightFollowsCurrentItem: false
         highlightMoveDuration: 0
-        cacheBuffer: Math.round(height * 0.42)
+        cacheBuffer: gridCacheBufferPx
         property int columns: Math.max(1, Math.floor(width / cellWidth))
         property int pendingEnsureIndex: -1
         // Empêche un glide interrompu par une nouvelle touche de déclencher les
