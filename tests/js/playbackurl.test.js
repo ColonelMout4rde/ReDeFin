@@ -300,17 +300,23 @@ test('_forceQuery : le jeton canonique est remplacé, jamais dupliqué', () => {
         'une piste héritée est effacée si le contexte n\'en demande plus');
 });
 
-test('_forceQuery : la clé héritée api_key d\'une TranscodingUrl doit aussi être effacée',
-    { todo: 'api_key n\'est pas dans _forceQueryCleanKeys : l\'URL finale peut porter deux jetons' }, () => {
-        // Chemin réel : playerOverlayHelper.js pose
-        // forceJellyfinTranscodingUrlCopyRemux, le Core reprend alors
-        // src.TranscodingUrl (qui contient api_key=...) SANS passer par
-        // _preserveJellyfinTranscodingQuery, lequel supprime bien la clé.
-        const fromJellyfin = LAN + '/videos/IT1/stream.mkv?api_key=JETON_JELLYFIN&VideoCodec=h264';
-        const url = U._forceQuery(fromJellyfin, ctx({ forceServerRemux: true }), null, false);
-        assert.equal(query(url).api_key, undefined,
-            'deux paramètres d\'authentification différents dans une même URL');
-    });
+test('_forceQuery : la clé héritée api_key d\'une TranscodingUrl est aussi effacée', () => {
+    // Chemin réel : playerOverlayHelper.js pose
+    // forceJellyfinTranscodingUrlCopyRemux, le Core reprend alors
+    // src.TranscodingUrl (qui contient api_key=...) SANS passer par
+    // _preserveJellyfinTranscodingQuery, lequel supprime bien la clé.
+    for (const stale of ['api_key', 'apikey']) {
+        const url = U._forceQuery(
+            LAN + '/videos/IT1/stream.mkv?' + stale + '=JETON_JELLYFIN&VideoCodec=h264',
+            ctx({ forceServerRemux: true }), null, false);
+        const q = query(url);
+        assert.equal(q[stale], undefined,
+            stale + ' : deux paramètres d\'authentification différents dans une même URL');
+        assert.equal(url.indexOf('JETON_JELLYFIN'), -1, stale + ' : jeton Jellyfin résiduel');
+        assert.equal(q.ApiKey, TOKEN, stale + ' : le jeton canonique de l\'application');
+        assert.equal(countKey(url, 'ApiKey'), 1, stale);
+    }
+});
 
 test('_forceQuery : sous-titres locaux ou absents => SubtitleStreamIndex=-1', () => {
     for (const c of [ctx({ useLocalSubs: true, selectedSubtitleStream: 3 }),
@@ -419,6 +425,9 @@ test('_forceQuery : refus d\'une URL vide ou HTTP hors LAN', () => {
     assert.equal(U._forceQuery('', ctx(), null, false), '');
     assert.equal(U._forceQuery(WAN + '/Videos/IT1/stream.mkv?ApiKey=x', ctx(), null, false), '',
         'jamais de jeton réécrit sur une URL HTTP hors LAN');
+    assert.equal(U._forceQuery(WAN + '/videos/IT1/stream.mkv?api_key=x',
+        ctx({ forceServerRemux: true }), null, false), '',
+        'le refus prime aussi sur le nettoyage de la clé héritée');
 });
 
 /* ===== 4. TranscodingUrl fournie par Jellyfin ===== */

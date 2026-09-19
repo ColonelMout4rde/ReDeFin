@@ -431,7 +431,7 @@ function _isTx3gSelected(src, subIndex) {
 }
 var _forceQueryCleanKeys = [
     "static", "Static", "AudioStreamIndex", "SubtitleStreamIndex", "SubtitleMethod",
-    "StartTimeTicks", "PlaySessionId", "ApiKey", "Container",
+    "StartTimeTicks", "PlaySessionId", "ApiKey", "api_key", "apikey", "Container",
     "AllowAudioStreamCopy", "AllowVideoStreamCopy", "EnableAutoStreamCopy",
     "EnableDirectStream", "EnableTranscoding", "allowAudioStreamCopy",
     "allowVideoStreamCopy", "enableAutoStreamCopy", "enableDirectStream",
