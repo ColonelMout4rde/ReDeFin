@@ -2,6 +2,7 @@
 .import "MediaCatalog.js" as MediaCatalog
 .import "SafeLog.js" as SafeLog
 .import "clientId.js" as ClientId
+.import "DevLog.js" as DevLog
 function _s(v){ return (v === undefined || v === null) ? "" : (v + ""); }
 function _safeCode(err, fallback) {
     return SafeLog.safeErrorCode(err, fallback || "network_error");
@@ -278,10 +279,15 @@ function _safeResponseHeaders(headers) {
     } catch(e0) {}
     return out;
 }
-function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, returnText) {
+// netInfo (facultatif) = { method, url, dtNetwork } fourni par l'appelant
+// transport (_xhrSend / _doHttp) pour la seule trace NET1 : dtNetwork couvre
+// l'envoi jusqu'à la réponse brute, dtParse est mesuré ici autour du parsing.
+function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, returnText, netInfo) {
     var raw = _s(rawText); var maxLen = returnText ? MAX_TEXT_RESPONSE_LEN : MAX_HTTP_TEXT_LEN;
     if (raw.length > maxLen)
         return { tooLarge: true };
+    var __logNet = DevLog.ENABLED && netInfo && _s(netInfo.method || "GET").toUpperCase() === "GET";
+    var __parseStart = __logNet ? _nowMsBridge() : 0;
     var json = null;
     if (!returnText) {
         try {
@@ -289,6 +295,11 @@ function _makeSafeHttpSuccessPayload(status, rawText, headersObj, jsonParseFn, r
         } catch(e0) {
             json = _parseJsonBounded(raw);
         }
+    }
+    if (__logNet) {
+        DevLog.log("NET1", "reseau url=" + DevLog.maskUrl(netInfo.url) +
+            " statut=" + (status | 0) + " taille=" + raw.length +
+            " dtReseau=" + (netInfo.dtNetwork | 0) + " dtParse=" + (_nowMsBridge() - __parseStart));
     }
     return {
         tooLarge: false,
@@ -695,6 +706,16 @@ function _apiGetFlush(key, expectedEntry, ok, payload) {
     }
     return true;
 }
+// Taille approximative du corps d'une réponse déjà parsée, pour la seule
+// trace NET1 (DevLog.ENABLED) : jamais calculée en usage normal.
+function _apiApproxBodySize(res) {
+    try {
+        if (!res) return 0;
+        if (typeof res.text === "string" && res.text.length) return res.text.length;
+        if (res.json !== undefined && res.json !== null) return JSON.stringify(res.json).length;
+    } catch (e0) {}
+    return 0;
+}
 function setClientIdentity(info) {
     if (!info || typeof info !== "object") return;
     try { ClientId.initFromQmlDevice(info); }
@@ -1003,7 +1024,7 @@ function _safeAltUrlForAuth(url, altHost) {
     return "";
 }
 function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { if (_rejectInsecureTransport(url, headers, body, onError)) { return _completedHttpHandle(); }
-    var xhr = null; var op = null;
+    var xhr = null; var op = null; var __sendStartMs = 0;
     try {
         if (typeof XMLHttpRequest === "undefined")
             throw new Error("XMLHttpRequest indisponible");
@@ -1037,7 +1058,8 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
                     rawTxt,
                     headersObj,
                     function() { return _parseJsonBounded(rawTxt); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __sendStartMs }
                 );
                 if (safe.tooLarge) {
                     op.fail({ code: "too_large", message: "too_large" });
@@ -1057,6 +1079,7 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
         var payload = (body == null)
             ? null
             : (typeof body === "string" ? body : JSON.stringify(body));
+        __sendStartMs = _nowMsBridge();
         xhr.send(payload);
         return op;
     } catch (e3) {
@@ -1069,7 +1092,7 @@ function _xhrSend(method, url, headers, body, onSuccess, onError, timeoutMs) { i
     }
 }
 function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if (_rejectInsecureTransport(url, headers, body, onError)) { return _completedHttpHandle(); }
-    var effectiveTimeout = Math.max(100, Number(timeoutMs || DEFAULT_NATIVE_TIMEOUT_MS)); var tx = null; var txOp = null;
+    var effectiveTimeout = Math.max(100, Number(timeoutMs || DEFAULT_NATIVE_TIMEOUT_MS)); var tx = null; var txOp = null; var __netT0 = _nowMsBridge();
     try {
         if (_fbx && _fbx.web && _fbx.web.http && _fbx.web.http.transaction && _fbx.web.http.transaction.factory) {
             tx = _fbx.web.http.transaction.factory(_s(method || "GET").toUpperCase(), url);
@@ -1096,7 +1119,8 @@ function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if
                     rawTxt,
                     resp.headers || {},
                     function() { return resp.jsonParse ? resp.jsonParse() : _parseJsonBounded(rawTxt); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __netT0 }
                 );
                 if (safe.tooLarge) {
                     txOp.fail({ code: "too_large", message: "too_large" });
@@ -1137,7 +1161,8 @@ function _doHttp(method, url, headers, body, onSuccess, onError, timeoutMs) { if
                     rawTxt2,
                     res.headers || {},
                     function() { return res.jsonParse ? res.jsonParse() : _parseJsonBounded(rawTxt2); },
-                    _shouldReturnTextForRequest(method, url, headers)
+                    _shouldReturnTextForRequest(method, url, headers),
+                    { method: method, url: url, dtNetwork: _nowMsBridge() - __netT0 }
                 );
                 if (safe2.tooLarge) {
                     reqOp.fail({ code: "too_large", message: "too_large" });
@@ -1348,14 +1373,25 @@ function sendRequest(method, url, headers, body, onSuccess, onError, _state) { /
         }
         var __ttl = _apiGetTtlMs(__url); var __cached = _apiGetCache[__key];
         if (__cached && __ttl > 0 && (__now - (__cached.ts || 0)) < __ttl) {
+            if (DevLog.ENABLED) {
+                DevLog.log("NET1", "cache url=" + DevLog.maskUrl(__url) +
+                    " statut=" + (__cached.res && __cached.res.status) +
+                    " taille=" + (__cached.size || 0) +
+                    " ageMs=" + (__now - (__cached.ts || 0)) + " ttlMs=" + __ttl);
+            }
             _laterBridge(function() {
                 if (onSuccess) onSuccess(__cached.res);
             });
             return _completedHttpHandle();
         }
         var __existingEntry = _apiGetInflight[__key];
-        if (__existingEntry && !_isArray(__existingEntry))
+        if (__existingEntry && !_isArray(__existingEntry)) {
+            if (DevLog.ENABLED) {
+                DevLog.log("NET1", "dedup url=" + DevLog.maskUrl(__url) +
+                    " attente=" + (_apiInflightActiveWaiterCount(__existingEntry) + 1));
+            }
             return _apiAddInflightWaiter(__key, __existingEntry, onSuccess, onError);
+        }
         // Chaque consommateur, y compris le premier, reçoit son propre handle.
         // Annuler une page ne laisse donc plus une entrée coalescée orpheline.
         var __entry = { waiters: [], leader: null, done: false, epoch: __cacheEpoch };
@@ -1372,7 +1408,8 @@ function sendRequest(method, url, headers, body, onSuccess, onError, _state) { /
                     var storedAt = _nowMsBridge();
                     _apiGetCache[__key] = { ts: storedAt, expiresAt: storedAt + __ttl,
                                             latestParentId: __latestParentId || "",
-                                            userItemId: __userItemId || "", res: res };
+                                            userItemId: __userItemId || "", res: res,
+                                            size: DevLog.ENABLED ? _apiApproxBodySize(res) : 0 };
                     _apiGetTrimCache();
                 }
                 _apiGetFlush(__key, __entry, true, res);
