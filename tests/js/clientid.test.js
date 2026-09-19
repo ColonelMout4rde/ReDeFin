@@ -381,7 +381,9 @@ test('APP_VERSION reste aligné sur manifest.json', () => {
         fs.readFileSync(path.join(REPO_ROOT, 'manifest.json'), 'utf8'));
     assert.equal(C.applicationVersion(), manifest.version,
                  'clientId.APP_VERSION et manifest.json doivent être synchrones');
-    assert.match(C.applicationVersion(), /^\d+\.\d+\.\d+$/);
+    // Trois composantes (version officielle) ou quatre (révision d'un fork,
+    // « 0.9.7.1 ») : ce que UpdateManager._parseVersion() sait comparer.
+    assert.match(C.applicationVersion(), /^\d+\.\d+\.\d+(\.\d+)?$/);
     assert.equal(C.clientVersion(), manifest.version);
 });
 
