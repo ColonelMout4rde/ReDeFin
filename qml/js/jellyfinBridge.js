@@ -36,6 +36,24 @@ function _safeHttpErrorPayload(status) {
     };
 }
 var MAX_HTTP_TEXT_LEN = 262144; var MAX_TEXT_RESPONSE_LEN = 4194304; var DEFAULT_XHR_TIMEOUT_MS = 15000; var DEFAULT_NATIVE_TIMEOUT_MS = 15000;
+// Restriction des types d'images renvoyés par les listes de navigation
+// (audit réseau, point 3) : sans EnableImageTypes, Jellyfin renvoie
+// ImageTags/BackdropImageTags pour TOUS ses types d'image sur chaque item
+// de la liste, même ceux qu'aucun écran ne lit. ImageTypeLimit=1 borne en
+// plus le nombre de tags par type (les cartes n'utilisent jamais que le
+// premier BackdropImageTags[0]). Un type retiré d'ici doit d'abord être
+// vérifié absent de tous les lecteurs de l'écran concerné (grep QML) :
+//  - grilles (moviepage.qml, posterUrlFor) : Primary, Thumb, Backdrop ;
+//  - /Items/Latest et Resume (PosterGridCard.qml, policies "standard" et
+//    "latest-series") : Primary, Thumb, Backdrop ;
+//  - /Shows/NextUp (NextUpBlock.qml + PosterGridCard "nextup-series") :
+//    Primary, Thumb — le Backdrop qui y apparaît vient de ParentBackdrop-
+//    ImageTags/SeriesPrimaryImageTag, des champs Fields= distincts, non
+//    affectés par EnableImageTypes ;
+//  - /Similar (SimilarItems.qml) : Primary seul.
+var IMG_TYPES_NAV_STANDARD = "&EnableImageTypes=Primary,Thumb,Backdrop&ImageTypeLimit=1";
+var IMG_TYPES_NAV_NEXTUP = "&EnableImageTypes=Primary,Thumb&ImageTypeLimit=1";
+var IMG_TYPES_NAV_PRIMARY_ONLY = "&EnableImageTypes=Primary&ImageTypeLimit=1";
 // Budget unique des opérations qui enchaînent plusieurs pages/fallbacks.
 // 14 s reste dans la fenêtre 12–15 s demandée et inclut toutes les sous-requêtes.
 var PAGED_OPERATION_BUDGET_MS = 14000;
@@ -2002,7 +2020,8 @@ function fetchHomeResumeItems(serverUrl, accessToken, userId, limit, onSuccess, 
         "&EnableTotalRecordCount=false" +
         // ParentId permet à Home de rouvrir une vidéo personnelle dans
         // son dossier PersonalMediaPage sans requête supplémentaire au clic.
-        "&Fields=" + homeMediaFields("BackdropImageTags,Type,CollectionType,ParentId")
+        "&Fields=" + homeMediaFields("BackdropImageTags,Type,CollectionType,ParentId") +
+        IMG_TYPES_NAV_STANDARD
     );
 
     sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
@@ -2022,7 +2041,8 @@ function fetchHomeNextUpItems(serverUrl, accessToken, userId, limit, onSuccess, 
     var path = "/Shows/NextUp?UserId=" + enc(userId) +
         "&Limit=" + enc(safeLimit) +
         "&EnableImages=true&EnableUserData=true&EnableTotalRecordCount=false" +
-        "&Fields=" + homeMediaFields("ParentId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,SeriesPrimaryImageTag");
+        "&Fields=" + homeMediaFields("ParentId,ParentThumbItemId,ParentThumbImageTag,ParentBackdropItemId,ParentBackdropImageTags,SeriesPrimaryImageTag") +
+        IMG_TYPES_NAV_NEXTUP;
     if (seriesId) path += "&SeriesId=" + enc(seriesId);
     if (enableResumable === true) path += "&EnableResumable=true";
     var url = _u(serverUrl, path);
@@ -2065,7 +2085,8 @@ function fetchSimilarItems(serverUrl, accessToken, userId, itemId, limit, onSucc
     var url = _u(serverUrl,
         "/Items/" + enc(itemId) + "/Similar?UserId=" + enc(userId) +
         "&Limit=" + enc(limit || 20) +
-        "&Fields=PrimaryImageAspectRatio,CustomRating,ItemCounts,RecursiveItemCount"
+        "&Fields=PrimaryImageAspectRatio,CustomRating,ItemCounts,RecursiveItemCount" +
+        IMG_TYPES_NAV_PRIMARY_ONLY
     );
     return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
         var j = jsonNormalize(res && res.json);
@@ -2098,7 +2119,8 @@ function fetchHomeLatestItemsForParent(serverUrl, accessToken, userId, parentId,
         "&EnableUserData=true" +
         "&Fields=" + homeMediaFields(
             "BackdropImageTags,SeriesPrimaryImageTag,ParentId,Type,CollectionType"
-        )
+        ) +
+        IMG_TYPES_NAV_STANDARD
     );
 
     return sendRequest("get", url, headersWithToken(accessToken), null, function(res) {
@@ -2239,7 +2261,8 @@ function _fetchFolderItemsByTypePage(serverUrl, accessToken, userId, folderId, t
                  "&EnableTotalRecordCount=false&SortBy=" + enc(_folderServerSortBy(sortMode)) +
                  "&SortOrder=" + enc(_folderServerSortOrder(sortMode)) +
                  "&StartIndex=" + localStart + "&Limit=" + pageLimit +
-                 "&Fields=" + _folderListFields(typeName);
+                 "&Fields=" + _folderListFields(typeName) +
+                 IMG_TYPES_NAV_STANDARD;
         return _u(serverUrl, query);
     }
     function finish(more, partialCode) {
