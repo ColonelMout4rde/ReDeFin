@@ -1,0 +1,125 @@
+# Intégration continue de ReDeFin.
+#
+# Rien n'est compilé : « ça compile » signifie ici que ./check.sh passe
+# (lint QML, syntaxe JS, tests Node, tests Qt Quick, tests Python) et que
+# ./build.sh sait produire le paquet .fbxqml. La CI exécute exactement les
+# mêmes scripts qu'un poste de développement, rien de plus : ce qui passe en
+# local passe ici, et inversement.
+#
+# Ce qui n'est PAS vérifié : le rendu, la lecture vidéo (QtMultimedia absent)
+# et le vrai module fbx.system. Seul un Freebox Player le permet.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Un nouveau push sur la même branche rend le précédent sans intérêt.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Versions figées : une nouvelle version de Qt ou de Node ne doit pas faire
+  # échouer un push sans rapport. À relever volontairement, dans un commit
+  # dédié. Doivent rester alignées sur l'environnement de développement.
+  REDEFIN_PYSIDE_VERSION: "6.11.2"
+  NODE_VERSION: "24"
+  PYTHON_VERSION: "3.12"
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  check:
+    name: Vérifications et paquet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Récupère les sources
+        uses: actions/checkout@v4
+
+      - name: Installe Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Installe Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Qt 6 (roues PySide6) se lie dynamiquement à ces bibliothèques même en
+      # rendu « offscreen » ; elles ne sont pas toutes sur l'image de base.
+      - name: Installe les bibliothèques système requises par Qt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libopengl0 libxkbcommon0 libfontconfig1 \
+            libdbus-1-3 libglib2.0-0
+
+      - name: Restaure le cache de l'outillage Qt (venv PySide6 + libfbxqml)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/redefin-qttools
+          key: qttools-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-pyside${{ env.REDEFIN_PYSIDE_VERSION }}-${{ hashFiles('tools/setup-qt-tools.sh', 'tools/fetch-libfbxqml.sh') }}
+
+      - name: Prépare l'outillage Qt
+        run: ./tools/setup-qt-tools.sh
+
+      # check.sh échoue (code 2) si un outil manque : aucune étape ne peut
+      # être sautée en silence.
+      - name: Vérifie (lint, syntaxe, tests Node, Qt Quick et Python)
+        shell: bash
+        run: |
+          set -o pipefail
+          ./check.sh 2>&1 | tee "${RUNNER_TEMP}/check.log"
+
+      # Les journaux d'un run ne sont lisibles que connecté à GitHub ; les
+      # annotations et le résumé, eux, sont publics. En cas d'échec on y
+      # recopie donc l'essentiel : le bilan par étape, puis les lignes
+      # d'erreur (les tests « todo » de Node, attendus, sont écartés).
+      - name: Résume l'échec
+        if: failure()
+        shell: bash
+        run: |
+          log="${RUNNER_TEMP}/check.log"
+          [ -f "$log" ] || { echo "::error title=CI::check.sh n'a produit aucun journal"; exit 0; }
+          {
+            echo "## Échec de check.sh"
+            echo '```'
+            sed -n '/^== Résumé ==/,$p' "$log"
+            echo '```'
+            echo "### Lignes d'erreur"
+            echo '```'
+            grep -nE 'ÉCHEC|Erreur|Error|error:|^not ok|FAIL!|Traceback|cannot open shared object|could not|No such file' "$log" \
+              | grep -v '# TODO' | head -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          bilan="$(sed -n '/^== Résumé ==/,$p' "$log" | head -12)"
+          bilan="${bilan//'%'/'%25'}"; bilan="${bilan//$'\n'/'%0A'}"
+          echo "::error title=Bilan check.sh::${bilan}"
+          # Les traces d'erreur (unittest, QtTest) précèdent le bilan.
+          fin="$(sed '/^== Résumé ==/,$d' "$log" | tail -n 70)"
+          fin="${fin//'%'/'%25'}"; fin="${fin//$'\r'/}"; fin="${fin//$'\n'/'%0A'}"
+          echo "::error title=Fin du journal avant le bilan::${fin}"
+          grep -E 'ÉCHEC|^not ok|FAIL!|Traceback|cannot open shared object|Erreur :' "$log" \
+            | grep -v '# TODO' | head -8 | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              echo "::error title=check.sh::${line:0:900}"
+            done || true
+
+      - name: Construit le paquet .fbxqml
+        run: ./build.sh
+
+      - name: Publie le paquet comme artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fbxqml-${{ github.sha }}
+          path: build/*.fbxqml
+          if-no-files-found: error
+          retention-days: 14

@@ -248,8 +248,14 @@ function _revProfile(mode) {
             // Flux serveur (remux/transcodage progressif) : le Core demande
             // volontairement Embed pour éviter une sidecar locale hors DirectPlay.
             // MKV est choisi précisément pour rendre ce contrat cohérent.
+            // ASS/SSA en font partie : le Core les classe en sous-titres texte
+            // et demande Embed pour eux comme pour les SRT. Ils restent
+            // volontairement absents des entrées External : une sidecar .ass
+            // n'est pas affichée par le Player (bug Free FS#9935).
             { Format: "srt", Method: "Embed" },
             { Format: "subrip", Method: "Embed" },
+            { Format: "ass", Method: "Embed" },
+            { Format: "ssa", Method: "Embed" },
             { Format: "vtt", Method: "Embed" },
             { Format: "webvtt", Method: "Embed" },
 
@@ -411,9 +417,15 @@ function _revForceTranscode(ctx, src) {
     if (frameRate > 60) return true;
 
     if (_isRiskyVideoCodec(videoCodec)) return true;
-    if (_isRiskyAudioCodec(audioCodec)) return true;
 
     if (channels > 6) return true;
+
+    // Un codec audio non sûr ne justifie pas, à lui seul, de réencoder la
+    // vidéo : si le CE4100 sait décoder la vidéo telle quelle, la policy
+    // demande un transcodage AUDIO SEUL (requiresAudioOnlyTranscode) et le
+    // Core copie la vidéo. Même principe que la policy Devialet. Si la vidéo
+    // n'est de toute façon pas copiable, le transcodage complet reste dû.
+    if (_isRiskyAudioCodec(audioCodec)) return !_revVideoCopySafe(videoCodec);
 
     // Cas PGS Révolution : un MKV n'est plus, à lui seul, une raison de
     // réencoder la vidéo. Si les codecs réellement choisis sont copiables, on
@@ -429,6 +441,26 @@ function _revForceTranscode(ctx, src) {
     return false;
 }
 
+function _revAudioOnlyTranscode(ctx, src, audioIndex) {
+    if (!src) return false;
+
+    // Réservé aux sources dont la vidéo est lisible telle quelle : sinon c'est
+    // _revForceTranscode() qui tranche et la vidéo est réencodée.
+    if (_revRequiresHardVideoTranscode(ctx, src)) return false;
+
+    var v = Core._firstStream(src, "Video");
+    if (!_revVideoCopySafe(v && v.Codec)) return false;
+
+    var a = _audioStreamByIndexSafe(src, (typeof audioIndex === "number") ? audioIndex : -1);
+    // Au-delà de 6 canaux, _revForceTranscode() conserve le transcodage
+    // complet historique : ce cas ne passe pas par l'audio seul.
+    if (_num(a && a.Channels) > 6) return false;
+
+    // E-AC3/DD+, DTS, TrueHD, FLAC... : la conversion AC3 du Core suffit, la
+    // vidéo H.264/MPEG déjà compatible n'a pas à repasser par l'encodeur.
+    return _isRiskyAudioCodec(a && a.Codec);
+}
+
 function _policyObject() {
     return {
         policyId: REVOLUTION_POLICY_ID,
@@ -440,6 +472,7 @@ function _policyObject() {
         shouldForceTranscode: _revForceTranscode,
         shouldForceSubtitleEncode: _revPgsNeedsEncode,
         requiresHardVideoTranscode: _revRequiresHardVideoTranscode,
+        requiresAudioOnlyTranscode: _revAudioOnlyTranscode,
         preferredTranscodeProtocol: _revPreferredTranscodeProtocol,
         preferredTranscodeVideoCodec: _revPreferredTranscodeVideoCodec,
         preferredTranscodeDimensions: _revPreferredTranscodeDimensions,
@@ -468,10 +501,20 @@ function _cloneCtxForRevolution(ctx) {
         }
     }
 
-    // Quand la vidéo dépasse réellement les capacités CE4100, demander à
-    // PlaybackInfo une vraie sortie H.264 sans video-copy. Ainsi, si le Core
-    // conserve ensuite la TranscodingUrl Jellyfin, celle-ci a déjà été calculée
-    // avec la policy Révolution (MKV/H.264 + CodecProfiles 1080p/8 bits).
+    // Intention : quand la vidéo dépasse réellement les capacités CE4100,
+    // demander à PlaybackInfo une vraie sortie H.264 sans video-copy, pour que
+    // la TranscodingUrl éventuellement conservée par le Core ait déjà été
+    // calculée avec la policy Révolution (MKV/H.264 + CodecProfiles 1080p).
+    //
+    // ÉTAT RÉEL : ce bloc ne s'exécute JAMAIS. Le clone a lieu AVANT l'appel à
+    // /PlaybackInfo et le Core ne met aucune MediaSource dans ctx, donc la
+    // recherche ci-dessous retourne toujours null — y compris pour un HEVC 4K.
+    // Ce n'est pas une protection manquante : l'enveloppe 1080p/8 bits/H.264
+    // est garantie en aval par _revProfile() (CodecProfiles envoyés au
+    // serveur) et par la reconstruction de l'URL finale côté client, que le
+    // désaccord HLS/HTTP décrit plus haut rend obligatoire. Conservé tel quel
+    // pour ne pas diverger de l'amont ; toute modification doit être testée
+    // sur boîtier.
     var src = null;
     try {
         if (out.mediaSource && out.mediaSource.MediaStreams) src = out.mediaSource;

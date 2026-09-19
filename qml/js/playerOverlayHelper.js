@@ -2168,6 +2168,17 @@ function resetSeekRestoreGuard(root,targetMs,reason){
     resetSeekRestoreState(root,targetMs);
     if((reason||"")==="boot-seek"&&root._seekRestoreLastTargetMs>0) root._armSkipIntroResumeGate(root._seekRestoreLastTargetMs,"boot-seek");
 }
+// Cible déplacée pendant la restauration (seekBy/commitScrub/chapitre sur un
+// seek encore en vol) : on vise simplement la nouvelle position. L'échéance
+// est réarmée pour cette cible et les meilleurs échantillons, mesurés sur
+// l'ancienne, sont oubliés ; en revanche le compteur de tentatives et la phase
+// d'amorçage sont conservés, ce qui garde la borne globale
+// (seekRestoreAttemptLimit) même si la cible bouge à chaque passe.
+function retargetSeekRestore(root,targetMs,nowMs){
+    root._seekRestoreLastTargetMs=Math.max(0,Math.floor(Number(targetMs||0)));
+    root._seekRestoreBestDiffMs=2147483647; root._seekRestoreBestLocalMs=-1;
+    root._seekRestoreStableSamples=0; root._seekRestoreReadyWallMs=nowMs;
+}
 function beginTrackSwitchRebase(root, mp, forceLocalSeek) {
     var p = root._clampUi(root.uiPositionMs());
     root._trackSwitchRebaseActive = true;
@@ -2301,7 +2312,7 @@ function tickSeekRestore(root,mp,timer){
     if(root._pendingSeekMs<0){timer.stop();return;} if(mp.status!==root._mpBuffered&&mp.status!==root._mpLoaded)return;
     var now=_poNowMs(); if(root._seekRestoreReadyWallMs<=0)root._seekRestoreReadyWallMs=now;
     var target=root._pendingSeekMs,localTarget=root._trackSwitchVerificationActive?target:Math.max(0,target-root.baseOffsetMs);
-    if(mp.duration>0)localTarget=Math.min(localTarget,mp.duration); if(root._seekRestoreLastTargetMs!==target)root._resetSeekRestoreGuard(target,"target-changed");
+    if(mp.duration>0)localTarget=Math.min(localTarget,mp.duration); if(root._seekRestoreLastTargetMs!==target)retargetSeekRestore(root,target,now);
     var local=Math.max(0,mp.position|0),diff=rememberSeekRestoreSample(root,local,localTarget),tol=seekRestoreToleranceMs(root);
     if(root._seekRestoreAttempts>0&&diff<=tol){root._completeSeekRestoreVerified(target,local,diff,"first-acceptable-sample");return;}
     root._seekRestoreStableSamples=0;

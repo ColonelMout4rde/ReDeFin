@@ -67,12 +67,12 @@ class RawLineServer(threading.Thread):
         self.sock.listen(1)
         self.sock.settimeout(0.5)
         self.port = self.sock.getsockname()[1]
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._conn = None
 
     def run(self):
         conn = None
-        while not self._stop.is_set() and conn is None:
+        while not self._stop_event.is_set() and conn is None:
             try:
                 conn, _addr = self.sock.accept()
             except socket.timeout:
@@ -87,13 +87,13 @@ class RawLineServer(threading.Thread):
         try:
             for line in self.lines:
                 conn.sendall((line + "\n").encode("utf-8"))
-            while not self._stop.is_set():
+            while not self._stop_event.is_set():
                 time.sleep(0.05)
         except OSError:
             pass
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
         for sock in (self._conn, self.sock):
             if sock is not None:
                 try:

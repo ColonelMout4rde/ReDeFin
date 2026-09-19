@@ -639,6 +639,10 @@ function _apiIsUserItemDetailsUrl(url) {
     url = _s(url);
     if (url.indexOf("/Items/") < 0) return false;
     if (url.indexOf("/Items?") >= 0) return false;
+    // /Items/Latest est une collection, pas la fiche d'un item : « Latest »
+    // n'est pas un identifiant. La confondre avec une fiche lui imposerait le
+    // TTL court des fiches et fausserait l'invalidation par identifiant.
+    if (url.indexOf("/Items/Latest") >= 0) return false;
     if (url.indexOf("/Images/") >= 0) return false;
     if (url.indexOf("/PlaybackInfo") >= 0) return false;
     if (url.indexOf("/UserData") >= 0) return false;
@@ -839,6 +843,12 @@ function normalizeServerUrl(input, preferHttps) {
         return "";
     if (/\s/.test(authority))
         return "";
+    // Schéma et autorité ne sont pas sensibles à la casse : sans ce passage en
+    // minuscules, « HTTP://Host:8096 » et « http://host:8096 » deviennent deux
+    // clés de stockage, donc deux profils, deux serveurs mémorisés et deux
+    // entrées de coffre. Le chemin, lui, reste intact : un Jellyfin derrière un
+    // reverse-proxy peut être publié sur un sous-chemin sensible à la casse.
+    u = u.replace(/^https?:\/\/[^\/?#]*/i, function(head) { return head.toLowerCase(); });
     u = _stripQueryAndFragment(u);
     u = u.replace(/\/web\/index\.html.*$/i, "");
     u = u.replace(/\/web\/?$/i, "");
@@ -1777,8 +1787,13 @@ function authenticate(serverUrl, username, password, onSuccess, onError) {
 function validateToken(serverUrl, accessToken, onSuccess, onError) {
     var url = _u(serverUrl, "/Users/Me");
     sendRequest("get", url, headersWithToken(accessToken), null, function (res) {
-        var j = jsonNormalize(res.json) || {};
-        if (j && (j.Id || j.Name))
+        var j = jsonNormalize(res && res.json);
+        // Un corps illisible (page d'erreur d'un reverse-proxy, réponse
+        // tronquée) ne prouve rien sur le token : le signaler comme
+        // invalid_token purgerait la session pour une panne de transport.
+        if (!j)
+            onError && onError("parse_error");
+        else if (j.Id || j.Name)
             onSuccess && onSuccess(j);
         else
             onError && onError("invalid_token");

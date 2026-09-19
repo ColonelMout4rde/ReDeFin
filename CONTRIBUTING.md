@@ -112,6 +112,25 @@ node --test tests/js/pressgesture.test.js
 python3 -m unittest discover -s tests/py -v
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push, on pull requests and on
+demand (`workflow_dispatch`). It does nothing the scripts above do not do:
+it installs Node, Python and the few system libraries Qt 6 links against,
+runs `./tools/setup-qt-tools.sh`, then `./check.sh`, then `./build.sh`, and
+publishes the resulting `.fbxqml` as a workflow artifact (kept 14 days). A
+green run therefore means exactly "`./check.sh` passes on a clean machine".
+
+Tool versions are pinned in the workflow's `env` block (Node 24, Python 3.12,
+PySide6 through `REDEFIN_PYSIDE_VERSION`, which `setup-qt-tools.sh` honours
+locally too). Bump them on purpose, in a dedicated commit, and keep them in
+line with what you develop against. The PySide6 venv and the libfbxqml clone
+are cached between runs.
+
+On a fork, GitHub keeps workflows disabled until you enable them once in the
+repository's **Actions** tab. Like the local tooling, CI cannot check
+rendering, media playback or the real `fbx.system`: only a Player can.
+
 ## Writing tests
 
 Detailed guidance, with examples, is in [tests/README.md](tests/README.md).
@@ -318,6 +337,7 @@ qml/js/                  QML JavaScript libraries (.pragma library modules)
 qml/images/              Packaged images
 build.sh                 Builds the .fbxqml package (+ manifest validation)
 check.sh                 Lint + all test layers; must pass on every commit
+.github/workflows/ci.yml GitHub Actions: setup + check.sh + build.sh on every push
 tools/setup-qt-tools.sh  One-time setup (PySide6 venv + libfbxqml)
 tools/fetch-libfbxqml.sh Clones the official Freebox QML library
 tools/fbx-run.py         Runs the app on a Player in developer mode
