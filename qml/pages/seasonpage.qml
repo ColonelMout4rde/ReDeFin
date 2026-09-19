@@ -956,7 +956,11 @@ FocusScope {
     property bool _episodesFetchedOnce: false
     property bool _seasonFetchedOnce: false
     property bool _episodesRowAlive: true
-    property int minLoadingMs: 350
+    // Ancien plancher : 350 ms, pur anti-clignotement du spinner interne à la
+    // page (le rideau visuel réel reste protégé par SeasonRevealPolicy.
+    // revealReady()). Ramené à 0 (lot 3, MESURES.md « page saison »). Retour
+    // arrière en une ligne : remonter SeasonRevealPolicy.LOADING_OFF_MIN_MS.
+    property int minLoadingMs: SeasonRevealPolicy.LOADING_OFF_MIN_MS
     property int emptyEpisodesGraceMs: 2600
     property int _loadingStartedMs: 0
     property string loadingError: ""
@@ -1064,7 +1068,8 @@ FocusScope {
 
     Timer {
         id: loadingOffTimer
-        interval: 140
+        // Ancien plancher fixe : 140 ms (lot 3, cf. minLoadingMs ci-dessus).
+        interval: Math.max(0, SeasonRevealPolicy.LOADING_OFF_MIN_MS)
         repeat: false
         onTriggered: {
             if (disposed) return;
@@ -1087,7 +1092,7 @@ FocusScope {
         if (disposed || !(_episodesFetchedOnce && _seasonFetchedOnce)) return;
         if (episodes && episodes.length) loadingError = "";
         emptyEpisodesGraceTimer.stop();
-        loadingOffTimer.interval = Math.max(140, minLoadingMs - (Date.now() - _loadingStartedMs));
+        loadingOffTimer.interval = Math.max(0, minLoadingMs - (Date.now() - _loadingStartedMs));
         loadingOffTimer.restart();
     }
     function beginLoading(){

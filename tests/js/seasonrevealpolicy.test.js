@@ -90,3 +90,9 @@ test('LAYOUT_STABILITY_MS est plafonné à 150 ms (stabilité de mise en page, B
     assert.ok(Policy.LAYOUT_STABILITY_MS > 0 && Policy.LAYOUT_STABILITY_MS <= 150,
         'LAYOUT_STABILITY_MS doit rester dans la fenêtre de stabilité imposée (<=150ms)');
 });
+
+test('LOADING_OFF_MIN_MS (lot 3, MESURES.md « page saison » run 2) : plancher anti-clignotement ramené à 0, ShellPage tient déjà son propre rideau', () => {
+    const Policy = load();
+    assert.equal(typeof Policy.LOADING_OFF_MIN_MS, 'number');
+    assert.equal(Policy.LOADING_OFF_MIN_MS, 0);
+});

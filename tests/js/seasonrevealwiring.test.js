@@ -57,3 +57,9 @@ test('_armVisualReveal()/_releaseVisualReveal()/beginLoading() arment et purgent
     assert.match(SRC, /_revealLayoutStable = false; revealLayoutStabilityTimer\.restart\(\);/);
     assert.match(SRC, /revealLayoutStabilityTimer\.stop\(\);/);
 });
+
+test('minLoadingMs et loadingOffTimer sont alignés sur SeasonRevealPolicy.LOADING_OFF_MIN_MS (lot 3, anciens planchers 350 ms / 140 ms)', () => {
+    assert.match(SRC, /property int minLoadingMs:\s*SeasonRevealPolicy\.LOADING_OFF_MIN_MS/);
+    assert.match(SRC, /id: loadingOffTimer\s*\n\s*\/\/[^\n]*\n\s*interval:\s*Math\.max\(0,\s*SeasonRevealPolicy\.LOADING_OFF_MIN_MS\)/);
+    assert.match(SRC, /loadingOffTimer\.interval = Math\.max\(0, minLoadingMs - \(Date\.now\(\) - _loadingStartedMs\)\);/);
+});

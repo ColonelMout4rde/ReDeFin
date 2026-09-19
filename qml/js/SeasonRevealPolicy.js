@@ -36,10 +36,23 @@
  * asynchrone republie sa géométrie), plafonnée à 150 ms. Retour arrière en
  * une ligne : remonter cette constante (et/ou la valeur par défaut de
  * seasonpage.visualRevealInitialMinMs qui s'y aligne).
+ *
+ * Lot 3 (BRIEF-COMMUN.md, MESURES.md « page saison », run 2) :
+ * LOADING_OFF_MIN_MS remplace le plancher minLoadingMs (350 ms) et le
+ * plancher fixe du Timer loadingOffTimer (140 ms) de seasonpage.qml. Les
+ * deux ne protégeaient qu'un anti-clignotement du spinner interne à la page
+ * (ShellPage tient déjà son propre rideau, voir CLAUDE.md « Navigation
+ * performance rules ») : aucun défaut fonctionnel ne dépend du délai entre
+ * l'arrivée des données et la retombée de isLoading. Le rideau visuel réel
+ * (visualRevealPending / revealReady() ci-dessus) continue de retenir
+ * l'affichage tant que la rangée d'épisodes n'est pas structurellement
+ * prête, donc aucun flash ne peut apparaître. Retour arrière en une ligne :
+ * remonter cette constante.
  */
 .pragma library
 
 var LAYOUT_STABILITY_MS = 120; // ancien plancher minimum : 680 ms.
+var LOADING_OFF_MIN_MS = 0; // anciens planchers : minLoadingMs 350 ms, loadingOffTimer 140 ms.
 
 function revealReady(state) {
     state = state || {};
