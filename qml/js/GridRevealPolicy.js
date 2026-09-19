@@ -12,8 +12,21 @@
  * flash de décodage des affiches voisines) à SETTLE_MS, une courte marge
  * anti-scintillement pendant qu'un glissement ou un chargement de page
  * s'achève. Le garde-fou de temps maximal (MAX_ATTEMPTS à l'intervalle du
- * Timer appelant) est conservé à l'identique : c'est lui qui protège contre
- * une grille qui ne se stabilise jamais.
+ * Timer appelant) est conservé — même durée totale qu'avant, voir plus bas.
+ *
+ * Mesure (MESURES.md, « Retour d'une fiche vers la grille ») : la levée
+ * réelle arrivait ~250 ms après la restauration (4 passages) alors que
+ * SETTLE_MS ne vaut que 150 ms. Écart dû au Timer appelant (moviepage.qml) :
+ * il sondait toutes les 60 ms SANS échantillon au démarrage, donc le premier
+ * passage qui voit l'état stable arrive déjà 60 ms après la restauration, et
+ * il faut ensuite attendre que l'écart cumulé atteigne SETTLE_MS par pas de
+ * 60 ms (60→240 ms). POLL_INTERVAL_MS ci-dessous est la période que le Timer
+ * appelant doit utiliser, avec un échantillon immédiat au démarrage
+ * (triggeredOnStart) : le premier passage capture alors le vrai instant où
+ * l'état devient stable (stableSinceMs = l'horodatage réel, pas un multiple
+ * de l'intervalle), et 150/POLL_INTERVAL_MS passages suffisent ensuite pour
+ * franchir SETTLE_MS — au total SETTLE_MS + POLL_INTERVAL_MS au pire cas
+ * (~160-200 ms selon la marge du Player), contre ~250 ms avant.
  *
  * Aucune dépendance Qt : testable directement avec Node.
  */
@@ -25,9 +38,17 @@
 // à l'appui.
 var SETTLE_MS = 150;
 
+// Période du Timer appelant (moviepage.qml::restoreRevealTimer), à utiliser
+// avec triggeredOnStart:true. Divise SETTLE_MS exactement (150/50 = 3) pour
+// ne pas ajouter de latence inutile entre deux passages consécutifs.
+var POLL_INTERVAL_MS = 50;
+
 // Nombre maximal de passages du Timer appelant avant la levée forcée du
-// rideau (garde-fou), inchangé par rapport au comportement précédent.
-var MAX_ATTEMPTS = 80;
+// rideau (garde-fou). Ajusté avec POLL_INTERVAL_MS (60 -> 50 ms) pour
+// conserver la même durée totale de garde-fou qu'avant (80 * 60 = 96 * 50 =
+// 4800 ms) : la latence normale change, pas la protection contre une grille
+// qui ne se stabilise jamais.
+var MAX_ATTEMPTS = 96;
 
 /**
  * Un pas de la boucle de révélation.

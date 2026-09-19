@@ -63,7 +63,13 @@ test('SAISON3 et SAISON4 tracent la réponse des épisodes puis le modèle posé
 test('SAISON5 trace chaque étape du visual reveal avec sa raison (arm/release) ou son nom', () => {
     const matches = SRC.match(/DevLog\.log\("SAISON5",\s*"step=([^"\s]+)/g) || [];
     const steps = matches.map((m) => /step=([^"\s]+)/.exec(m)[1]);
-    for (const expected of ['layoutSettle', 'posterWarmup', 'logoArmed', 'bgActive', 'detailsFetch', 'detailsReady', 'armVisualReveal', 'releaseVisualReveal']) {
+    for (const expected of [
+        'layoutSettle', 'posterWarmup', 'logoArmed', 'bgActive', 'detailsFetch', 'detailsReady',
+        'armVisualReveal', 'releaseVisualReveal',
+        // Lot 3 : une trace par condition de SeasonRevealPolicy.revealReady(),
+        // pour voir laquelle retient encore la levée du rideau.
+        'postFirstFrame', 'episodesRowSettled', 'layoutStable',
+    ]) {
         assert.ok(steps.indexOf(expected) !== -1, 'étape manquante dans SAISON5 : ' + expected);
     }
 });
@@ -71,6 +77,17 @@ test('SAISON5 trace chaque étape du visual reveal avec sa raison (arm/release) 
 test('SAISON5 (arm/release) journalise la raison passée à _armVisualReveal/_releaseVisualReveal', () => {
     assert.match(SRC, /step=armVisualReveal reason="\s*\+\s*\(reason \|\| ""\)/);
     assert.match(SRC, /step=releaseVisualReveal reason="\s*\+\s*\(reason \|\| ""\)/);
+});
+
+test("SAISON5 (lot 3) journalise postFirstFrame/episodesRowSettled/layoutStable une seule fois par cycle de rideau", () => {
+    assert.match(SRC, /property bool _saison5FirstFrameLogged: false/);
+    assert.match(SRC, /property bool _saison5RowSettledLogged: false/);
+    // Réinitialisées à chaque armement du rideau (_armVisualReveal), pour ne
+    // pas répéter la trace lors d'un cycle suivant (retour, nouvelle saison).
+    const idxArm = SRC.indexOf('function _armVisualReveal(');
+    const idxArmEnd = SRC.indexOf('function _releaseVisualReveal(');
+    const armBody = SRC.slice(idxArm, idxArmEnd);
+    assert.match(armBody, /_saison5FirstFrameLogged = false; _saison5RowSettledLogged = false;/);
 });
 
 test('SAISON6 trace la fin du rideau sur loadingGateActive redevenant faux', () => {

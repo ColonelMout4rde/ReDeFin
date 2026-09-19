@@ -13,6 +13,8 @@ import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/UserStore.js" as UserStore
 import "../js/DevLog.js" as DevLog
 import "../js/GridRevealPolicy.js" as GridReveal
+import "../js/GridWindowCache.js" as GridWindowCache
+import "../js/GridFetchDispatch.js" as GridFetchDispatch
 Item {
     id: moviepage
     width: parent ? parent.width : 1920
@@ -759,6 +761,100 @@ Item {
     }
     function _scheduleStateSave() { stateSaveTimer.restart() }
 
+    /* ========= Cache de la dernière fenêtre de grille (F1) =========
+     * Toute la décision (clé, fraîcheur, signature, réaffectation) vit dans
+     * GridWindowCache.js, module pur testé dans tests/js/gridwindowcache.test.js.
+     * Le bucket est un sous-objet de shared.__focusState : ShellPage le vide
+     * déjà entièrement (_resetUiFocusStateForProfilePicker) à chaque entrée
+     * sur LoginPage.qml, donc à chaque changement de profil. Ce chemin ne
+     * couvre pas le changement de serveur passant par serverpage.qml : la clé
+     * inclut donc en plus serverUrl/userId (voir GridWindowCache.js). */
+    readonly property bool gridWindowCacheEnabled: true
+    property var _windowCacheRevalidateHandle: null
+
+    function _windowCacheKey() {
+        return GridWindowCache.cacheKey(serverUrl, userId, folderId, normalizedLibraryMode, sortMode, "")
+    }
+
+    function _windowCacheBucket() {
+        if (!shared) return null
+        if (!shared.__focusState) shared.__focusState = ({})
+        if (!shared.__focusState.gridWindowCache) shared.__focusState.gridWindowCache = ({})
+        return shared.__focusState.gridWindowCache
+    }
+
+    function _cancelWindowCacheRevalidate(reason) {
+        var h = _windowCacheRevalidateHandle
+        _windowCacheRevalidateHandle = null
+        try { if (h && h.cancel) h.cancel(reason || "context_changed") } catch(e) {}
+    }
+
+    function _writeWindowCache(windowStartIndex, items) {
+        if (!gridWindowCacheEnabled) return
+        var bucket = _windowCacheBucket()
+        if (!bucket) return
+        var entry = GridWindowCache.buildEntry(Date.now(), windowStartIndex,
+                folderPageNextStart, folderPageHasMore, folderPageHasPrevious, items || [])
+        Jellyfin.putBoundedMemory(bucket, _windowCacheKey(), entry, GridWindowCache.MAX_ENTRIES)
+    }
+
+    // Revalide en arrière-plan la fenêtre servie depuis le cache : même
+    // requête que le premier chargement (même page fetchPage/paramètres),
+    // mais son résultat n'est comparé qu'à la signature mémorisée. On
+    // n'appelle PAS _appendWindowFolderItems/_applySort ici : cette fonction
+    // fusionne par identifiant et ignore silencieusement un item déjà connu
+    // (utile pour la pagination, mais elle ne verrait donc jamais une mise à
+    // jour vu/reprise/non-vus d'un item déjà affiché).
+    function _revalidateWindowCache(cachedEntry) {
+        var myToken = _fetchToken
+        var start = cachedEntry.windowStartIndex | 0
+        var fetchPage = _selectFetchPageFn()
+        _windowCacheRevalidateHandle = fetchPage(
+            serverUrl, accessToken, userId, folderId, start, folderPageSize, sortMode,
+            function(page) {
+                _windowCacheRevalidateHandle = null
+                if (myToken !== _fetchToken) return
+                var fresh = _normalizePageItems((page && page.items) ? page.items : [])
+                var changed = GridWindowCache.computeSignature(fresh) !== cachedEntry.signature
+                DevLog.log("GRID7", "cache revalidated changed=" + changed)
+                if (changed) fetchFolder(true)
+            },
+            function(err) {
+                _windowCacheRevalidateHandle = null
+                // Échec silencieux : l'affichage servi depuis le cache est
+                // conservé tel quel, une prochaine ouverture retentera.
+            }
+        )
+    }
+
+    // Sert immédiatement la dernière fenêtre connue de cette grille, si elle
+    // existe, est fraîche et correspond à la portion de bibliothèque visée
+    // par la restauration en cours. Ne fait AUCUNE requête réseau ; la
+    // revalidation (réseau) est déclenchée séparément par l'appelant.
+    function _tryServeFromWindowCache() {
+        var bucket = _windowCacheBucket()
+        var key = _windowCacheKey()
+        var res = GridWindowCache.readEntry(bucket, key, Date.now(), folderWindowStartIndex)
+        if (res.status !== "hit") {
+            DevLog.log("GRID7", "cache " + res.status)
+            return false
+        }
+        var entry = res.entry
+        _rawFolderItems = entry.rawItems || []
+        folderPageNextStart = entry.nextStart | 0
+        folderPageHasMore = !!entry.hasMore
+        folderPageHasPrevious = !!entry.hasPrevious
+        fetchedOnce = true
+        loadingItems = false
+        _refreshLibraryMediaMode()
+        _applySort(false, false, true)
+        folderLoadState = (folderItems && folderItems.length > 0) ? "ready" : "empty"
+        DevLog.log("GRID7", "cache hit items=" + _rawFolderItems.length)
+        Qt.callLater(_applyRestore)
+        _revalidateWindowCache(entry)
+        return true
+    }
+
     /* ========= Navigation hiérarchique Séries / Mixte ========= */
     function _isBrowserSeries(it) { return !collectionsMode && hierarchicalMode && MediaCatalog.isSeries(it) }
     function _isBrowserFolder(it) { return !collectionsMode && hierarchicalMode && MediaCatalog.isFolder(it) }
@@ -888,7 +984,14 @@ Item {
 
     Timer {
         id: restoreRevealTimer
-        interval: 60
+        // Période alignée sur GridRevealPolicy.SETTLE_MS (150 = 50*3) et
+        // échantillon immédiat au démarrage (triggeredOnStart) : sans lui, le
+        // premier passage n'arrivait qu'après un intervalle complet, donc la
+        // levée mesurait ~250 ms au lieu des 150 ms de SETTLE_MS (voir
+        // GridRevealPolicy.js et MESURES.md). MAX_ATTEMPTS a été réhaussé en
+        // proportion pour garder la même durée totale de garde-fou.
+        interval: GridReveal.POLL_INTERVAL_MS
+        triggeredOnStart: true
         repeat: true
         running: false
         onTriggered: {
@@ -1055,6 +1158,19 @@ Item {
         return result.added | 0
     }
 
+    function _selectFetchPageFn() {
+        var fetchPage = Jellyfin.fetchMovieFolderItemsPage
+        if (personalMode && Jellyfin.fetchPersonalMediaFolderItemsPage)
+            fetchPage = Jellyfin.fetchPersonalMediaFolderItemsPage
+        else if (collectionsMode && Jellyfin.fetchCollectionFolderItemsPage)
+            fetchPage = Jellyfin.fetchCollectionFolderItemsPage
+        else if (normalizedLibraryMode === "mixed" && Jellyfin.fetchMixedFolderItemsPage)
+            fetchPage = Jellyfin.fetchMixedFolderItemsPage
+        else if (normalizedLibraryMode === "series")
+            fetchPage = Jellyfin.fetchMediaBrowserItemsPage
+        return fetchPage
+    }
+
     function _requestFolderPageAt(start, prepend, restoreAfter) {
         _hydrateSensitiveContextFromShared()
         if (!accessToken || !userId || !serverUrl || !folderId) return
@@ -1076,15 +1192,7 @@ Item {
         folderLoadErrorText = ""
         folderLoadState = initialLoad ? "loadingInitial" : "loadingMore"
 
-        var fetchPage = Jellyfin.fetchMovieFolderItemsPage
-        if (personalMode && Jellyfin.fetchPersonalMediaFolderItemsPage)
-            fetchPage = Jellyfin.fetchPersonalMediaFolderItemsPage
-        else if (collectionsMode && Jellyfin.fetchCollectionFolderItemsPage)
-            fetchPage = Jellyfin.fetchCollectionFolderItemsPage
-        else if (normalizedLibraryMode === "mixed" && Jellyfin.fetchMixedFolderItemsPage)
-            fetchPage = Jellyfin.fetchMixedFolderItemsPage
-        else if (normalizedLibraryMode === "series")
-            fetchPage = Jellyfin.fetchMediaBrowserItemsPage
+        var fetchPage = _selectFetchPageFn()
 
         var requestHandle = null
         requestHandle = fetchPage(
@@ -1108,6 +1216,12 @@ Item {
                 if (progress.hasPrevious !== null) folderPageHasPrevious = progress.hasPrevious
                 if (progress.nextStart !== null) folderPageNextStart = progress.nextStart
                 if (progress.hasMore !== null) folderPageHasMore = progress.hasMore
+
+                // F1 (reseau.md/grilles.md) : ce premier chargement de fenêtre
+                // (initial ou relancé après une revalidation qui a détecté un
+                // changement) devient la nouvelle référence du cache de grille.
+                if (initialLoad && !prepend)
+                    _writeWindowCache(start, _rawFolderItems)
 
                 _applySort(true, false, true)
                 if (prepend && folderPrependNavSteps > 0 && grid && grid.count > 0) {
@@ -1371,6 +1485,9 @@ Item {
     }
 
     // éviter un fetch trop tôt ou une réponse vide qui gagnerait la course côté MoviePage.
+    // Ne sert plus qu'à absorber une injection de contexte qui arrive après le
+    // tout premier départ (ex. playbackDeviceMode résolu après coup, voir
+    // GridFetchDispatch.js) : le tout premier départ, lui, ne l'attend plus.
     Timer {
         id: fetchDebounceTimer
         interval: 80
@@ -1378,19 +1495,57 @@ Item {
         onTriggered: fetchFolder()
     }
 
+    // GRID1→GRID2 mesuré à 190 ms (docs/audit-navigation/grilles.md) : ShellPage
+    // injecte accessToken/userId/serverUrl/folderId/libraryMode en plusieurs
+    // propriétés distinctes après Component.onCompleted (jamais toutes à la
+    // fois), et chacune relançait les 80 ms d'anti-rebond même une fois le
+    // contexte complet. GridFetchDispatch.js décide seul du comportement ;
+    // voir ce module pour le détail.
+    property bool _firstFetchDispatched: false
+    property bool _fetchDispatchPending: false
+
+    function _dispatchFetchNow() {
+        _fetchDispatchPending = false
+        _firstFetchDispatched = true
+        fetchFolder()
+    }
+
     function scheduleFetchFolder() {
         if (!ready) return
         _cancelFolderPageRequest("context_changed")
-        fetchDebounceTimer.restart()
+        _cancelWindowCacheRevalidate("context_changed")
+
+        var action = GridFetchDispatch.nextAction({
+            contextComplete: !!(accessToken && userId && serverUrl && folderId),
+            firstDispatchDone: _firstFetchDispatched,
+            dispatchPending: _fetchDispatchPending
+        })
+        _fetchDispatchPending = action.dispatchPending
+
+        if (action.immediate) {
+            // Qt.callLater, jamais un appel synchrone : ShellPage peut encore
+            // être en train d'injecter d'autres propriétés (restoreIndex,
+            // restoreY...) dans le même appel ; le tour d'événement suivant
+            // les trouvera toutes posées.
+            fetchDebounceTimer.stop()
+            Qt.callLater(_dispatchFetchNow)
+            return
+        }
+        if (action.arm) fetchDebounceTimer.restart()
     }
 
-    function fetchFolder() {
+    // bypassCache : utilisé uniquement par _revalidateWindowCache() quand la
+    // revalidation en arrière-plan a détecté un contenu différent de celui
+    // servi depuis le cache ; force alors un chargement complet normal
+    // plutôt que de resservir l'entrée (désormais périmée) une seconde fois.
+    function fetchFolder(bypassCache) {
         _hydrateSensitiveContextFromShared()
         if (!accessToken || !userId || !serverUrl || !folderId) return
 
         DevLog.log("GRID2", "fetchFolder départ mode=" + normalizedLibraryMode +
                             " pageSize=" + folderPageSize)
         _fetchToken++
+        _cancelWindowCacheRevalidate("context_changed")
         _restoreSortFromShared()
         _armFolderRestoreVisualLoading()
         _resetFolderPaging()
@@ -1409,6 +1564,13 @@ Item {
         fetchedOnce = false
         folderLoadState = "loadingInitial"
         folderLoadErrorText = ""
+
+        // F1 (reseau.md/grilles.md) : au retour sur une grille déjà affichée
+        // dans la session, montrer tout de suite la dernière fenêtre connue
+        // (sans attendre le réseau ni l'anti-rebond) et revalider derrière.
+        if (!bypassCache && gridWindowCacheEnabled && _tryServeFromWindowCache())
+            return
+
         _requestFolderPage(true)
     }
 
@@ -2856,6 +3018,7 @@ Item {
     /* ========= Retour ========= */
     Component.onDestruction: {
         _cancelFolderPageRequest("destroyed")
+        _cancelWindowCacheRevalidate("destroyed")
         _cancelSelectedDetailRequest()
         _countSeq++
         countFocusFallbackTimer.stop()

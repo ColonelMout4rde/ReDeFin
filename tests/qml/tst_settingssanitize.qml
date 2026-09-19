@@ -440,4 +440,38 @@ TestCase {
 
         destroyApp(app);
     }
+
+    // Accueil résident (audit shell, F2) : l'accueil vit dans son propre
+    // Loader, survit aux autres pages et meurt à l'ouverture du lecteur.
+    // Aucune vraie page n'est instanciée ici, à l'exception de HomePage sans
+    // identifiants (donc sans requête) : seuls les états du shell sont lus.
+    function test_residentHome_survivesOtherPagesAndDiesWithPlayer() {
+        var app = newApp();
+        var shell = testCase._findShellPage(app, 16);
+        verify(shell !== null, "ShellPage introuvable dans l'arbre main.qml");
+        compare(shell.keepHomeResident, true);
+        compare(shell._homeResidentSource, "", "jamais chargé avant d'y naviguer");
+
+        shell.currentPage = "HomePage.qml?ctx=1&ageMax=99";
+        compare(shell._homeResidentSource, "HomePage.qml");
+        compare(shell._homeVisible, true);
+        compare(shell._pageLoaderSource, "", "le Loader de page ne charge pas l'accueil");
+
+        shell.currentPage = "pageabsente.qml?ctx=1";
+        compare(shell._homeResidentSource, "HomePage.qml", "l'accueil reste en vie");
+        compare(shell._homeVisible, false, "mais caché");
+        compare(shell._pageLoaderSource, "pageabsente.qml");
+
+        shell.currentPage = "HomePage.qml?ctx=1&ageMax=99";
+        compare(shell._homeVisible, true);
+        compare(shell._pageLoaderSource, "");
+
+        shell.playerActive = true;
+        compare(shell._homeResidentSource, "", "détruit pour laisser la mémoire au lecteur");
+        compare(shell._homeVisible, false);
+        shell.playerActive = false;
+        compare(shell._homeResidentSource, "HomePage.qml", "reconstruit au retour du lecteur");
+
+        destroyApp(app);
+    }
 }

@@ -939,11 +939,19 @@ FocusScope {
     // settle/warmup/logo/bg/details précédente. Le temps qu'un Loader
     // asynchrone (rangée d'épisodes) republie sa géométrie, pas plus.
     property bool _revealLayoutStable: false
+    // Lot 3 (MESURES.md « page saison ») : une trace par condition de
+    // revealReady(), une seule fois par cycle de rideau, pour voir laquelle
+    // retient encore la levée sans avoir à deviner depuis les anciennes
+    // minuteries (posterWarmup/bgActive/layoutSettle, qui ne gardent plus le
+    // rideau mais continuent leur propre trace pour leurs autres usages).
+    property bool _saison5FirstFrameLogged: false
+    property bool _saison5RowSettledLogged: false
     Timer {
         id: revealLayoutStabilityTimer
         interval: Math.max(0, SeasonRevealPolicy.LAYOUT_STABILITY_MS)
         repeat: false
         onTriggered: {
+            DevLog.log("SAISON5", "step=layoutStable dt=" + (Date.now() - _saisonT0));
             _revealLayoutStable = true;
             _tickVisualReveal();
         }
@@ -956,7 +964,11 @@ FocusScope {
     property bool _episodesFetchedOnce: false
     property bool _seasonFetchedOnce: false
     property bool _episodesRowAlive: true
-    property int minLoadingMs: 350
+    // Ancien plancher : 350 ms, pur anti-clignotement du spinner interne à la
+    // page (le rideau visuel réel reste protégé par SeasonRevealPolicy.
+    // revealReady()). Ramené à 0 (lot 3, MESURES.md « page saison »). Retour
+    // arrière en une ligne : remonter SeasonRevealPolicy.LOADING_OFF_MIN_MS.
+    property int minLoadingMs: SeasonRevealPolicy.LOADING_OFF_MIN_MS
     property int emptyEpisodesGraceMs: 2600
     property int _loadingStartedMs: 0
     property string loadingError: ""
@@ -985,11 +997,20 @@ FocusScope {
         }
     }
     function _visualEpisodesRowSettled(){
-        if (!episodes || !episodes.length) return true;
-        var it = (episodesRowLoader.status === Loader.Ready) ? episodesRowLoader.item : null;
-        if (!it || it._booting === true) return false;
-        try { if (it.posterGateMax !== undefined && Number(it.posterGateMax) < 0) return false; } catch(e0) {}
-        return true;
+        // Décision pure déportée dans SeasonRevealPolicy.js (testable sans QML,
+        // voir tests/js/seasonrevealpolicy.test.js) : Loader instancié, plus en
+        // boot, fenêtre de posters calculée (pas les affiches décodées) et
+        // délégué de l'épisode courant réellement créé (currentItemReady).
+        var ready = (episodesRowLoader.status === Loader.Ready) ? episodesRowLoader.item : null;
+        var state = { hasEpisodes: !!(episodes && episodes.length), loaderReady: !!ready };
+        try {
+            if (ready) {
+                state.booting = (ready._booting === true);
+                state.posterGateMax = ready.posterGateMax;
+                state.currentItemReady = (ready.currentItemReady !== undefined) ? !!ready.currentItemReady : true;
+            }
+        } catch(e0) {}
+        return SeasonRevealPolicy.episodesRowStructurallyReady(state);
     }
     // Décision produit (lot 2) : ne dépend plus du fond, du logo, du panneau
     // d'actions ni de la fiche détaillée de l'épisode sélectionné (voir
@@ -1009,6 +1030,7 @@ FocusScope {
         if (disposed) return;
         DevLog.log("SAISON5", "step=armVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         _visualRevealReturnMode = returnMode === true; _visualRevealStartedMs = Date.now(); visualRevealPending = true;
+        _saison5FirstFrameLogged = false; _saison5RowSettledLogged = false;
         _revealLayoutStable = false; revealLayoutStabilityTimer.restart();
         visualRevealSettleTimer.stop(); visualRevealPollTimer.restart(); visualRevealHardTimer.restart();
     }
@@ -1028,6 +1050,10 @@ FocusScope {
     function _tickVisualReveal(){
         if (!visualRevealPending || disposed) return;
         if (isLoading) { visualRevealPollTimer.restart(); return; }
+        if (!_saison5RowSettledLogged && _visualEpisodesRowSettled()) {
+            _saison5RowSettledLogged = true;
+            DevLog.log("SAISON5", "step=episodesRowSettled dt=" + (Date.now() - _saisonT0));
+        }
         var elapsed = Math.max(0, Date.now() - Number(_visualRevealStartedMs || 0));
         var minHold = _visualRevealReturnMode ? visualRevealReturnMinMs : visualRevealInitialMinMs;
         if (elapsed >= minHold && _visualAssetsSettled()) {
@@ -1064,7 +1090,8 @@ FocusScope {
 
     Timer {
         id: loadingOffTimer
-        interval: 140
+        // Ancien plancher fixe : 140 ms (lot 3, cf. minLoadingMs ci-dessus).
+        interval: Math.max(0, SeasonRevealPolicy.LOADING_OFF_MIN_MS)
         repeat: false
         onTriggered: {
             if (disposed) return;
@@ -1087,7 +1114,7 @@ FocusScope {
         if (disposed || !(_episodesFetchedOnce && _seasonFetchedOnce)) return;
         if (episodes && episodes.length) loadingError = "";
         emptyEpisodesGraceTimer.stop();
-        loadingOffTimer.interval = Math.max(140, minLoadingMs - (Date.now() - _loadingStartedMs));
+        loadingOffTimer.interval = Math.max(0, minLoadingMs - (Date.now() - _loadingStartedMs));
         loadingOffTimer.restart();
     }
     function beginLoading(){
@@ -1164,7 +1191,13 @@ FocusScope {
             });
         }
     }
-    onPostFirstFrameChanged: if (visualRevealPending) visualRevealPollTimer.restart()
+    onPostFirstFrameChanged: {
+        if (postFirstFrame && !_saison5FirstFrameLogged) {
+            _saison5FirstFrameLogged = true;
+            DevLog.log("SAISON5", "step=postFirstFrame dt=" + (Date.now() - _saisonT0));
+        }
+        if (visualRevealPending) visualRevealPollTimer.restart();
+    }
     onLayoutSettleChanged: if (visualRevealPending) visualRevealPollTimer.restart()
     onInitialWarmupChanged: if (visualRevealPending) visualRevealPollTimer.restart()
 

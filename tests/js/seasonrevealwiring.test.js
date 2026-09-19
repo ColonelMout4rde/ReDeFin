@@ -45,6 +45,21 @@ test('_visualEpisodesRowSettled() (structurel, pas image) reste utilisée par _v
     assert.match(body, /episodesRowSettled:\s*_visualEpisodesRowSettled\(\)/);
 });
 
+test('_visualEpisodesRowSettled() passe par SeasonRevealPolicy.episodesRowStructurallyReady() (lot 3, testable sans QML)', () => {
+    const idx = SRC.indexOf('function _visualEpisodesRowSettled()');
+    const end = SRC.indexOf('function _visualAssetsSettled()');
+    assert.notEqual(idx, -1);
+    const body = SRC.slice(idx, end);
+    assert.match(body, /SeasonRevealPolicy\.episodesRowStructurallyReady\(/);
+});
+
+test("_visualEpisodesRowSettled() lit currentItemReady sur le délégué (lot 3 : délégué de l'épisode cible créé)", () => {
+    const idx = SRC.indexOf('function _visualEpisodesRowSettled()');
+    const end = SRC.indexOf('function _visualAssetsSettled()');
+    const body = SRC.slice(idx, end);
+    assert.match(body, /currentItemReady/);
+});
+
 test('visualRevealInitialMinMs est aligné sur SeasonRevealPolicy.LAYOUT_STABILITY_MS (ancien plancher : 680 ms)', () => {
     assert.match(SRC, /property int visualRevealInitialMinMs:\s*SeasonRevealPolicy\.LAYOUT_STABILITY_MS/);
 });
@@ -56,4 +71,10 @@ test('le timeout dur du visual reveal reste à 3200 ms', () => {
 test('_armVisualReveal()/_releaseVisualReveal()/beginLoading() arment et purgent la fenêtre de stabilité de mise en page', () => {
     assert.match(SRC, /_revealLayoutStable = false; revealLayoutStabilityTimer\.restart\(\);/);
     assert.match(SRC, /revealLayoutStabilityTimer\.stop\(\);/);
+});
+
+test('minLoadingMs et loadingOffTimer sont alignés sur SeasonRevealPolicy.LOADING_OFF_MIN_MS (lot 3, anciens planchers 350 ms / 140 ms)', () => {
+    assert.match(SRC, /property int minLoadingMs:\s*SeasonRevealPolicy\.LOADING_OFF_MIN_MS/);
+    assert.match(SRC, /id: loadingOffTimer\s*\n\s*\/\/[^\n]*\n\s*interval:\s*Math\.max\(0,\s*SeasonRevealPolicy\.LOADING_OFF_MIN_MS\)/);
+    assert.match(SRC, /loadingOffTimer\.interval = Math\.max\(0, minLoadingMs - \(Date\.now\(\) - _loadingStartedMs\)\);/);
 });

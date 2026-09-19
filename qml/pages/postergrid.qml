@@ -475,6 +475,19 @@ Item {
     }
     function hasPendingFocusRestore(){ return _snapshotNeedsRestore(_focusSnapshot()); }
 
+    // Instrumentation HOME1 (mission « accueil » lot 3) : la porte de
+    // HomePage n'exige plus latestFetchCompleted, SAUF quand une
+    // restauration de focus en attente vise la rangée « Récemment ajouté »
+    // (focusSection 3 dans le snapshot) — sans les données Latest, on ne
+    // saurait ni où replacer le focus ni éviter qu'il saute une fois la
+    // rangée remplie. Utilisé par HomeGatePolicy.canFinish() via
+    // HomePage._canFinishGate().
+    function pendingFocusRestoreTargetsLatest() {
+        var snap = _focusSnapshot()
+        if (!_snapshotNeedsRestore(snap)) return false
+        return Math.max(0, Math.min(3, snap.focusSection || 0)) === 3
+    }
+
     function consumeFocusSnapshotKeepState() {
         var snap = _focusSnapshot()
         if (!snap) return false
@@ -699,6 +712,13 @@ Item {
     readonly property bool allowAnims: !!(pageActive && !isScrollingEff && _homeRevealReady)
     readonly property bool allowMarquee: allowAnims; property bool fetchedOnce: false
     property bool libraryFetchCompleted: false; property bool resumeFetchCompleted: false; property bool nextUpFetchCompleted: false
+    // Instrumentation HOME1 (mission « accueil » lot 3, point 3) : horodatage
+    // de la dernière fois que nextUpFetchCompleted est passé à vrai, pour
+    // que HomePage puisse dater la levée du rideau par rapport à cet
+    // événement (constat 2 : Mes médias/Reprendre/À suivre ont leurs
+    // données avant que le rideau ne se lève, mesurer l'écart réel confirme
+    // que ce lot ne réintroduit pas d'attente cachée).
+    property double _nextUpFetchCompletedAtMs: 0
     property bool _bootFetchPending: false; property string _bootFetchKey: ""; property bool _fetchInFlight: false; property string _activeFetchKey: ""
     property double _lastFetchStartMs: 0; property double _lastHomeCacheWriteMs: 0; property bool _homeImagesReady: false; property bool _homeImageReturnFreeze: false
     property bool _homePosterVisualReady: false; readonly property bool homePosterVisualReady: _homePosterVisualReady; property int homePosterProbeMs: 45; property int homePosterReadySettleMs: 90
@@ -754,6 +774,7 @@ Item {
     }
     onNextUpFetchCompletedChanged: {
         if (DevLog.ENABLED) DevLog.log("HOME1", "nextUpFetchCompleted=" + nextUpFetchCompleted + " dt=" + (Date.now() - _t0))
+        if (nextUpFetchCompleted) _nextUpFetchCompletedAtMs = Date.now()
     }
     onLatestFetchCompletedChanged: {
         if (DevLog.ENABLED) DevLog.log("HOME1", "latestFetchCompleted=" + latestFetchCompleted + " dt=" + (Date.now() - _t0))
@@ -1512,6 +1533,18 @@ Item {
     property var _latestInitialPending: ({})
 
     property int _latestStageTarget: 0; property bool _latestInitialComplete: false; property bool _latestAllComplete: false; property bool latestFetchCompleted: false
+    // Constat 1 de l'audit accueil (mission « accueil » lot 3) : depuis que
+    // la porte de HomePage ne dépend plus de latestFetchCompleted, le
+    // premier reveal peut survenir AVANT que toutes les bibliothèques
+    // Latest aient répondu. `_homeRevealReady` ne suffit donc plus à
+    // distinguer « boot en cours, publier une seule fois » de « boot
+    // terminé, publier au fil de l'eau » : ce drapeau reste vrai une fois
+    // la première publication faite, quel que soit l'état du reveal
+    // ensuite (une restauration de focus peut le repasser à faux
+    // brièvement sans que ça change quoi que ce soit à la politique de
+    // publication Latest). Remis à faux à chaque nouvelle file initiale
+    // (_startLatestInitialQueue).
+    property bool _latestInitialPublishDone: false
     function _latestQueueDone(){ return _latestLibs && _latestPos >= _latestLibs.length && _latestInFlight <= 0; }
     Timer { id: latestPumpTimer; interval: postergrid.latestStartDelayMs; repeat: false; onTriggered: postergrid._pumpLatestInitial() }
     Timer { id: latestInitialWatchdog; interval: 500; repeat: true; running: postergrid._alive && postergrid._latestInFlight > 0; onTriggered: postergrid._sweepLatestInitialRequests() }
@@ -1594,6 +1627,7 @@ Item {
         postergrid._latestInitialComplete = false
         postergrid._latestAllComplete = false
         postergrid.latestFetchCompleted = false
+        postergrid._latestInitialPublishDone = false
         if (!postergrid.fetchedOnce || !postergrid.latestByFolder || postergrid.latestByFolder.length === 0) postergrid._setLatestByFolderIfChanged([])
         if (!_focusRestorePending && !_restoringFocus) {
             postergrid.latestIndicesByGroup = []
@@ -1627,27 +1661,47 @@ Item {
         // explicite (aucune n'a été trouvée en lecture de code).
         if (DevLog.ENABLED) DevLog.log("HOME1", "latestByFolder publish groups=" + out.length
                     + " cards=" + cardCount + " dt=" + (Date.now() - _t0))
+        // Instrumentation HOME1 (mission « accueil » lot 3, point 3) :
+        // MESURES.md relevait ~1,36 s sans aucune trace entre la publication
+        // et la suite (thread UI bloqué par la création synchrone des
+        // sections/cartes). L'affectation ci-dessous est le seul endroit qui
+        // matérialise le Repeater ; Qt.callLater ne s'exécute qu'une fois la
+        // boucle d'événements libre, donc le delta mesuré ici couvre bien
+        // toute la création synchrone déclenchée par cette seule affectation
+        // (et non un travail sans rapport qui suivrait dans la même passe).
+        var publishBlockStartMs = DevLog.ENABLED ? Date.now() : 0
         postergrid._setLatestByFolderIfChanged(out)
         var inds = (postergrid.latestIndicesByGroup && postergrid.latestIndicesByGroup.slice) ? postergrid.latestIndicesByGroup.slice(0) : []
         while (inds.length < out.length) inds.push(0)
         if (!postergrid.latestIndicesByGroup || inds.length !== postergrid.latestIndicesByGroup.length) postergrid.latestIndicesByGroup = inds
         if (!_focusRestorePending && !_restoringFocus) postergrid.currentLatestGroup = MediaCatalog.clampIndex(postergrid.currentLatestGroup, out.length)
+        if (DevLog.ENABLED) {
+            Qt.callLater(function() {
+                if (DevLog.ENABLED) DevLog.log("HOME1", "latestByFolder publish blocked ms=" + (Date.now() - publishBlockStartMs))
+            })
+        }
     }
     function _rebuildLatestByFolderFromTemp() {
         postergrid._latestAllComplete = postergrid._latestQueueDone()
         postergrid.latestFetchCompleted = postergrid._latestAllComplete
-        // Constat 1 de l'audit accueil : avant que l'accueil ne soit révélé
-        // une première fois, chaque bibliothèque Latest reçue republiait
-        // latestByFolder, ce qui vide et régénère tout le Repeater
-        // (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6 fois pour
-        // 6 bibliothèques, alors que le rideau attend de toute façon la
-        // dernière. On ne publie donc qu'une fois toutes les réponses
-        // attendues arrivées (_latestAllComplete, y compris via le timeout
-        // existant qui force cet état dans forceHomeBootstrapCompletion).
-        // Une fois l'accueil déjà révélé une première fois (homeRevealReady),
-        // la publication incrémentale habituelle reprend : chargement par
-        // proximité en défilant, rechargement d'une section évincée.
-        if (postergrid._homeRevealReady || postergrid._latestAllComplete) {
+        // Constat 1 de l'audit accueil : chaque bibliothèque Latest reçue
+        // republiait latestByFolder, ce qui vide et régénère tout le
+        // Repeater (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6
+        // fois pour 6 bibliothèques. Depuis la mission « accueil » lot 3, le
+        // rideau ne garantit plus que la dernière réponse Latest est déjà
+        // là avant le reveal (constat 2) : gater uniquement sur
+        // _homeRevealReady republierait donc une fois par bibliothèque
+        // pendant que l'utilisateur navigue déjà, ce qui est pire que le
+        // défaut d'origine. On ne publie donc qu'une fois TOUTES les
+        // réponses de la file initiale arrivées (_latestAllComplete, y
+        // compris via le timeout existant qui force cet état dans
+        // forceHomeBootstrapCompletion), et on retient ce premier succès
+        // dans _latestInitialPublishDone : toute complétion suivante
+        // (chargement par proximité en défilant, rechargement d'une
+        // section évincée) ne concerne plus qu'une poignée de bibliothèques
+        // et peut donc publier au fil de l'eau sans reproduire la rafale.
+        if (postergrid._latestInitialPublishDone || postergrid._latestAllComplete) {
+            postergrid._latestInitialPublishDone = true
             postergrid._publishLatestFromTemp()
         }
     }

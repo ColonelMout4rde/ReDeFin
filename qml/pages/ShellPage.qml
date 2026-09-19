@@ -21,6 +21,7 @@ import "../js/clientId.js" as ClientId
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
 import "../js/PageLoaderSource.js" as PageLoaderSource
+import "../js/HomeResidency.js" as HomeResidency
 import "../js/PageCurtainPolicy.js" as PageCurtainPolicy
 
 FocusScope {
@@ -64,18 +65,77 @@ FocusScope {
     property var _pageLoaderState: PageLoaderSource.createState()
 
     function _syncPageLoaderSource() {
+        var page = shell._stripSensitiveQueryForCtx(shell.currentPage)
+        // L'accueil résident vit dans son propre Loader : pour le Loader de
+        // page, l'accueil équivaut à « aucune page » (et la page précédente
+        // est oubliée, pour que la suivante réarme bien le rideau).
+        var homeTakesOver = shell.keepHomeResident && HomeResidency.isHomePage(page)
         var next = PageLoaderSource.plan(shell._pageLoaderState,
-                                         shell._stripSensitiveQueryForCtx(shell.currentPage),
+                                         homeTakesOver ? "" : page,
                                          shell.playerActive,
                                          shell.pageLoaderUsesBaseUrl)
-        if (next.noop) return
-        shell._pageLoaderState = { source: next.source, page: next.page }
-        // Un type en cache se construit sans passer par Loader.Loading : le
-        // rideau est donc armé ici, AVANT que la source change, et non plus
-        // seulement sur ce signal.
+        if (!next.noop) {
+            shell._pageLoaderState = { source: next.source, page: next.page }
+            // Un type en cache se construit sans passer par Loader.Loading : le
+            // rideau est donc armé ici, AVANT que la source change, et non plus
+            // seulement sur ce signal.
+            if (next.arm) shell._beginPageCurtainTransition()
+            shell._pageLoaderSource = next.source
+            if (next.blankFirst) Qt.callLater(shell._syncPageLoaderSource)
+        }
+        // Toujours APRÈS le Loader de page : le vider passe par Loader.Null,
+        // qui relâche le rideau ; l'accueil doit pouvoir le réarmer ensuite.
+        shell._syncHomeResident()
+    }
+
+    // Accueil résident. Mesuré sur Révolution : même avec son type QML en
+    // cache, reconstruire l'accueil à chaque retour coûte ~3,7 s (recréation
+    // des cartes, restauration du focus, minuteries). HomePage reste donc en
+    // vie dans homeLoader, cachée et désactivée pendant qu'une grille ou une
+    // fiche occupe l'écran ; son onVisibleChanged gère déjà ce « retour
+    // externe ». Elle est détruite à l'ouverture du lecteur (mémoire) et aux
+    // frontières de session (splash, serveur, choix du profil). Décision dans
+    // HomeResidency.js (tests/js/homeresidency.test.js). Repasser
+    // keepHomeResident à false rend l'ancien comportement.
+    readonly property bool keepHomeResident: true
+    property string _homeResidentSource: ""
+    property var _homeResidentState: HomeResidency.createState()
+    property bool _homeVisible: false
+
+    readonly property bool _homeResidentShown: _homeVisible && !playerActive
+    readonly property var _activePageItem: _homeResidentShown
+        ? (homeLoader.status === Loader.Ready ? homeLoader.item : null)
+        : (pageLoader.status === Loader.Ready ? pageLoader.item : null)
+    readonly property bool _activePageReady: !!_activePageItem
+
+    function _syncHomeResident() {
+        var next = HomeResidency.plan(shell._homeResidentState,
+                                      shell._stripSensitiveQueryForCtx(shell.currentPage),
+                                      shell.playerActive,
+                                      shell.keepHomeResident)
+        shell._homeResidentState = { source: next.source, page: next.page }
+        if (!next.shown) shell._homeVisible = false
         if (next.arm) shell._beginPageCurtainTransition()
-        shell._pageLoaderSource = next.source
-        if (next.blankFirst) Qt.callLater(shell._syncPageLoaderSource)
+        shell._homeResidentSource = next.source
+        if (next.blankFirst) {
+            Qt.callLater(shell._syncHomeResident)
+            return
+        }
+        if (!next.shown) return
+        var wasVisible = shell._homeVisible
+        shell._homeVisible = true
+        if (next.resumed && !wasVisible && homeLoader.status === Loader.Ready && homeLoader.item)
+            shell._resumeResidentHome()
+    }
+
+    // Réaffichage d'un accueil déjà construit : rien n'est rechargé. HomePage
+    // a réarmé son propre chargement dans onVisibleChanged (d'où le rideau via
+    // shellLoading) ; le focus lui est rendu ici, ou à la levée du rideau.
+    function _resumeResidentHome() {
+        shell._takeFastHomeReturn()
+        if (DevLog.ENABLED)
+            DevLog.log("NAV3", "resumed dt=" + (Date.now() - shell._navT0) + " page=homepage.qml")
+        shell._handoffFocusAfterPageCurtain()
     }
 
     /* ===================== UPDATE CHECK ===================== */
@@ -134,9 +194,9 @@ FocusScope {
                 return
 
             try {
-                if (pageLoader.item &&
-                        pageLoader.item.forceActiveFocus) {
-                    pageLoader.item.forceActiveFocus(
+                if (shell._activePageItem &&
+                        shell._activePageItem.forceActiveFocus) {
+                    shell._activePageItem.forceActiveFocus(
                                 Qt.OtherFocusReason
                             )
                     return
@@ -172,8 +232,7 @@ FocusScope {
         if (!base || base === "splashpage.qml")
             return
 
-        if (pageLoader.status !== Loader.Ready ||
-                !pageLoader.item) {
+        if (!shell._activePageReady) {
             return
         }
 
@@ -261,7 +320,7 @@ FocusScope {
 
     function _schedulePageCurtainRelease(seq) {
         if (seq !== _pageLoadCurtainSeq) return
-        if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) return
+        if (!shell._activePageReady) return
         if (!(_pageCurtainReadySinceMs > 0))
             _pageCurtainReadySinceMs = Date.now()
         // Repart avec des ticks stables à zéro (peut être ré-appelé après
@@ -287,7 +346,7 @@ FocusScope {
                 stop()
                 return
             }
-            if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) {
+            if (!shell._activePageReady) {
                 return
             }
 
@@ -312,7 +371,7 @@ FocusScope {
 
             stop()
             if (curtainSeq === shell._pageLoadCurtainSeq &&
-                    pageLoader.status === Loader.Ready &&
+                    shell._activePageReady &&
                     !shell._pageReportedLoading) {
                 shell._pageLoadCurtainHold = false
                 shell._homeLaunchPending = false
@@ -327,14 +386,14 @@ FocusScope {
     // État visuel remonté par la page courante. Le Loader QML peut être Ready
     // alors que Jellyfin, le backdrop ou le focus ne le sont pas encore.
     readonly property bool _pageReportedLoading: {
-        var p = pageLoader ? pageLoader.item : null
+        var p = shell._activePageItem
         if (!p) return false
         try { if (p.hasOwnProperty("shellLoading")) return p.shellLoading === true } catch(e0) {}
         var base = _baseOf(currentPage).toLowerCase()
         return false
     }
     readonly property string _pageReportedLoadingError: {
-        var p = pageLoader ? pageLoader.item : null
+        var p = shell._activePageItem
         try { if (p && p.hasOwnProperty("shellLoadingError")) return String(p.shellLoadingError || "") } catch(e0) {}
         return ""
     }
@@ -348,9 +407,9 @@ FocusScope {
         Qt.callLater(function() {
             if (seq !== shell._pageFocusHandoffSeq) return
             if (shell.playerActive || pageLoadCurtain.visible) return
-            if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) return
+            if (!shell._activePageReady) return
 
-            var p = pageLoader.item
+            var p = shell._activePageItem
             try {
                 if (p.restoreFocusAfterShellCurtain
                         && typeof p.restoreFocusAfterShellCurtain === "function") {
@@ -2022,8 +2081,8 @@ FocusScope {
         if (baseNow === "homepage.qml") {
             Qt.callLater(function() {
                 try {
-                    if (pageLoader.item && pageLoader.item.forceActiveFocus)
-                        pageLoader.item.forceActiveFocus()
+                    if (shell._activePageItem && shell._activePageItem.forceActiveFocus)
+                        shell._activePageItem.forceActiveFocus()
                 } catch(eFocusHome) {}
             })
         }
@@ -2223,6 +2282,49 @@ FocusScope {
         onLoaded: shell._onPageLoaded(item, shell._pageLoadCurtainSeq)
     }
 
+    /* ===================== ACCUEIL RÉSIDENT ======================= */
+    // Même place et même contrat que pageLoader, mais l'instance survit aux
+    // autres pages (voir _syncHomeResident). Cachée, elle est aussi désactivée :
+    // ni touches, ni focus, et postergrid.pageActive retombe à faux.
+    Loader {
+        id: homeLoader
+        anchors.fill: parent
+        source: shell._homeResidentSource
+        visible: shell._homeResidentShown
+        enabled: visible
+        asynchronous: true
+        onStatusChanged: {
+            if (status === Loader.Loading) {
+                shell._beginPageCurtainTransition()
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV2", "loading dt=" + (Date.now() - shell._navT0) + " page=homepage.qml")
+            } else if (status === Loader.Error) {
+                shell._pageLoadCurtainSeq = (shell._pageLoadCurtainSeq + 1) | 0
+                shell._pageLoadCurtainHold = false
+                shell._homeLaunchPending = false
+                try { pageCurtainReleaseTimer.stop() } catch(e0) {}
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                               " page=homepage.qml reason=loader-error")
+            } else if (status === Loader.Ready) {
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV3", "ready dt=" + (Date.now() - shell._navT0) + " page=homepage.qml")
+                shell._schedulePageCurtainRelease(shell._pageLoadCurtainSeq)
+            }
+        }
+        onLoaded: {
+            // L'utilisateur est reparti avant la fin du chargement : les
+            // paramètres de currentPage ne sont plus ceux de l'accueil, on
+            // ne garde pas une instance à moitié initialisée.
+            if (!shell._homeVisible) {
+                shell._homeResidentState = HomeResidency.createState()
+                shell._homeResidentSource = ""
+                return
+            }
+            shell._onPageLoaded(item, shell._pageLoadCurtainSeq)
+        }
+    }
+
     // Curtain global de session : il couvre la construction QML et le chargement
     // visuel réel uniquement après le lancement de HomePage. Pendant Splash /
     // Server / Login, SplashPage reste l'unique écran logo + CircleDots.
@@ -2238,6 +2340,7 @@ FocusScope {
                  shell._circleDotsRuntimeEnabled &&
                  (shell._homeLaunchPending ||
                   pageLoader.status === Loader.Loading ||
+                  homeLoader.status === Loader.Loading ||
                   shell._pageLoadCurtainHold ||
                   shell._pageReportedLoading)
         enabled: visible

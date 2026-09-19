@@ -60,6 +60,25 @@ test('HomePage.qml trace la levée du rideau avec sa raison', () => {
     assert.match(HOME_PAGE, /DevLog\.log\("HOME1", "gate release reason=hard-recovery-timeout"/);
 });
 
+test('HomePage.qml trace la levée du rideau par rapport à nextUpFetchCompleted (mission accueil lot 3)', () => {
+    // Constat 2 : mesurer sur boîtier l'écart entre la dernière donnée
+    // nécessaire au reveal (nextUpFetchCompleted) et la levée effective du
+    // rideau, maintenant que celui-ci n'attend plus latestFetchCompleted.
+    assert.match(POSTERGRID, /property double _nextUpFetchCompletedAtMs:\s*0\b/);
+    assert.match(POSTERGRID, /if \(nextUpFetchCompleted\) _nextUpFetchCompletedAtMs = Date\.now\(\)/);
+    assert.match(HOME_PAGE, /DevLog\.log\("HOME1", "gate release reason=" \+ \(reason \|\| "unspecified"\)[\s\S]*?sinceNextUp=" \+ sinceNextUp\)/);
+});
+
+test('postergrid.qml trace la durée de blocage de la publication Latest (mission accueil lot 3)', () => {
+    // MESURES.md : ~1,36 s sans aucune trace entre la publication et la
+    // suite (thread UI bloqué par la création synchrone des sections/
+    // cartes). Qt.callLater ne s'exécute qu'une fois la boucle d'événements
+    // libre, donc le delta mesuré couvre bien la création synchrone
+    // déclenchée par la publication.
+    assert.match(POSTERGRID, /var publishBlockStartMs = DevLog\.ENABLED \? Date\.now\(\) : 0/);
+    assert.match(POSTERGRID, /Qt\.callLater\(function\(\) \{\s*\n\s*if \(DevLog\.ENABLED\) DevLog\.log\("HOME1", "latestByFolder publish blocked ms="/);
+});
+
 test('les traces HOME1 sur le chemin chaud restent derrière DevLog.ENABLED', () => {
     // Toute ligne DevLog.log("HOME1" doit être précédée (même ligne ou la
     // précédente) d'une garde if (DevLog.ENABLED).
