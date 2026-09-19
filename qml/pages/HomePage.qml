@@ -26,6 +26,7 @@ import QtQuick 2.15
 
 import "../components" as Components
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 
 FocusScope {
     id: homePage
@@ -291,6 +292,9 @@ FocusScope {
        ============================================================ */
     property bool _loading: true
     readonly property bool shellLoading: _loading
+    // Instrumentation HOME1 : horodatage de la création de HomePage (voir
+    // Component.onCompleted plus bas), pour dater le chemin de chargement.
+    property double _t0: 0
     readonly property string shellLoadingError: ""
 
     // Retour de navigation externe vers l'onglet Accueil.
@@ -515,7 +519,7 @@ FocusScope {
                         return
                 }
             } catch(eCache) {}
-            homePage.tryFinishGate()
+            homePage.tryFinishGate("fast-return-fallback")
         })
     }
 
@@ -598,7 +602,7 @@ FocusScope {
         return true;
     }
 
-    function tryFinishGate() {
+    function tryFinishGate(reason) {
         if (!_loading) {
             return;
         }
@@ -607,6 +611,10 @@ FocusScope {
             _waitForHomePosters = false
             _homeVisualReturnPrepared = false
             _loading = false;
+            if (DevLog.ENABLED)
+                DevLog.log("HOME1", "gate release reason=" + (reason || "unspecified")
+                            + " dt=" + (_nowMs() - _loadingStartMs)
+                            + " sinceCreate=" + (_nowMs() - _t0))
             gateMaxTimer.stop();
             gateHardRecoveryTimer.stop();
 
@@ -658,7 +666,7 @@ FocusScope {
                 _preparePosterGridForReveal(reason || "warm-postergrid")
                 if (!gateMaxTimer.running) gateMaxTimer.restart()
                 gateSettleTimer.restart()
-                tryFinishGate()
+                tryFinishGate(reason || "warm-postergrid")
             }
 
             return true
@@ -671,7 +679,7 @@ FocusScope {
         id: gateSettleTimer
         interval: homePage.fastHomeReturn ? homePage.fastReturnSettleMs : homePage.settleMs
         repeat: false
-        onTriggered: homePage.tryFinishGate()
+        onTriggered: homePage.tryFinishGate("settle")
     }
 
     Timer {
@@ -717,6 +725,10 @@ FocusScope {
             homePage._waitForHomePosters = false
             homePage._homeVisualReturnPrepared = false
             homePage._loading = false
+            if (DevLog.ENABLED)
+                DevLog.log("HOME1", "gate release reason=hard-recovery-timeout"
+                            + " dt=" + (homePage._nowMs() - homePage._loadingStartMs)
+                            + " sinceCreate=" + (homePage._nowMs() - homePage._t0))
             homePage._scheduleHomeFocusRelease()
         }
     }
@@ -1787,19 +1799,23 @@ FocusScope {
         pokeLoadingGate()
     }
 
-    Component.onCompleted: Qt.callLater(function () {
-        _hydrateSensitiveContextFromShared()
-        _applyContextToPosterGrid()
+    Component.onCompleted: {
+        _t0 = _nowMs()
+        if (DevLog.ENABLED) DevLog.log("HOME1", "HomePage onCompleted dt=0")
+        Qt.callLater(function () {
+            _hydrateSensitiveContextFromShared()
+            _applyContextToPosterGrid()
 
-        // Nouvelle HomePage après LoginPage : le contenu doit pouvoir recevoir
-        // son focus initial. Le verrou sera ensuite coupé uniquement lorsque
-        // l'utilisateur place explicitement le focus sur les onglets/SearchPage.
-        _keepHomeTabFocused = false
-        _setPosterGridFocusAllowed(true, "homepage-completed")
+            // Nouvelle HomePage après LoginPage : le contenu doit pouvoir recevoir
+            // son focus initial. Le verrou sera ensuite coupé uniquement lorsque
+            // l'utilisateur place explicitement le focus sur les onglets/SearchPage.
+            _keepHomeTabFocused = false
+            _setPosterGridFocusAllowed(true, "homepage-completed")
 
-        beginLoadingGate();
-        pokeLoadingGate();
-    })
+            beginLoadingGate();
+            pokeLoadingGate();
+        })
+    }
 
     Keys.onPressed: {
         if (event.key === Qt.Key_Left || event.key === Qt.Key_Right || event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Select || event.key === Qt.Key_Ok)

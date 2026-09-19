@@ -2,6 +2,7 @@ import QtQuick 2.15
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 Item {
     id: postergrid
     objectName: "postergrid"
@@ -66,6 +67,10 @@ Item {
     property bool ready: false
     property bool _syncFolderIndex: false
     property bool _alive: false
+    // Instrumentation HOME1 : horodatage de la création de postergrid, pour
+    // dater tous les événements du chargement de l'accueil (dt en ms depuis
+    // Component.onCompleted). Voir CLAUDE.md « Debugging on device ».
+    property double _t0: 0
     property int _fetchSeq: 0
     property int _nextUpSeq: 0
     property bool _syncNextUpIndex: false
@@ -697,6 +702,28 @@ Item {
         }
     }
 
+    // Instrumentation HOME1 (constat 1 de l'audit accueil) : chaque étape du
+    // chemin de chargement, avec dt depuis la création de postergrid. Ne
+    // trace jamais d'URL ni de jeton, seulement des booléens/durées.
+    onFetchedOnceChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "fetchedOnce=" + fetchedOnce + " dt=" + (Date.now() - _t0))
+    }
+    onLibraryFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "libraryFetchCompleted=" + libraryFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onResumeFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "resumeFetchCompleted=" + resumeFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onNextUpFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "nextUpFetchCompleted=" + nextUpFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onLatestFetchCompletedChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "latestFetchCompleted=" + latestFetchCompleted + " dt=" + (Date.now() - _t0))
+    }
+    onHomeRevealReadyChanged: {
+        if (DevLog.ENABLED) DevLog.log("HOME1", "homeRevealReady=" + homeRevealReady + " dt=" + (Date.now() - _t0))
+    }
+
     readonly property int homeCacheFreshMs: 180000; readonly property int visibleRefetchMinAgeMs: 180000
     function hasCreds() { return !!(accessToken && userId && serverUrl) }
     function _dataEmpty() {
@@ -904,13 +931,15 @@ Item {
                 return false
             }
             var now = Date.now()
-            var cacheKey = _homeCacheKey(); var c = _touchHomeCache(st, cacheKey, now)
+            var cacheKey = _homeCacheKey(); var hadCacheEntry = !!(st[cacheKey]); var c = _touchHomeCache(st, cacheKey, now)
             if (!c) {
+                if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=" + (hadCacheEntry ? "cache-perime" : "cache-absent") + " dt=" + (now - _t0))
                 _trimHomeCacheStore(st, "")
                 return false
             }
             var cacheTs = Number(c.ts || 0)
             if (_lastHomeCacheRestoreKey === cacheKey && _lastHomeCacheRestoreCacheTs === cacheTs && _lastHomeCacheRestoreAtMs > 0 && (now - _lastHomeCacheRestoreAtMs) >= 0 && (now - _lastHomeCacheRestoreAtMs) <= homeCacheRestoreDedupMs && fetchedOnce === true && libraryFetchCompleted === true && resumeFetchCompleted === true && nextUpFetchCompleted === true && latestFetchCompleted === true) {
+                if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=cache-frais-dedup dt=" + (now - _t0))
                 return true
             }
             _trimHomeCacheStore(st, cacheKey)
@@ -942,6 +971,7 @@ Item {
             _lastHomeCacheRestoreKey = cacheKey
             _lastHomeCacheRestoreCacheTs = cacheTs
             _lastHomeCacheRestoreAtMs = Date.now()
+            if (DevLog.ENABLED) DevLog.log("HOME1", "home-return path=cache-frais dt=" + (Date.now() - _t0))
             return true
         } catch(e) {
             return false
@@ -1868,8 +1898,10 @@ Item {
     }
 
     Component.onCompleted: {
+        _t0 = Date.now()
         _alive = true
         ready = true
+        if (DevLog.ENABLED) DevLog.log("HOME1", "postergrid onCompleted dt=0")
         ensureBootFetch()
         scheduleBackdropFocusRefresh()
     }
