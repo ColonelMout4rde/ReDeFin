@@ -1746,7 +1746,11 @@ FocusScope {
                 seasonsHydrated=false;
                 _syncPosterSources();
                 _updatePosterGate();
-                bgUpdateTimer.restart();
+                // F2 : au premier affichage, ne pas attendre les 320 ms du
+                // debounce pour lancer la requête du backdrop. Le timer reste
+                // utile pour les rafraîchissements suivants (retour Player,
+                // changement d'item sur la même instance de page).
+                backdrop.updateBackdropNow();
                 if (!seasonsFetched && !seasonsFetchInFlight)
                     fetchSeasons()
                 serverResponseSlow=false;

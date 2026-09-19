@@ -1389,7 +1389,12 @@ FocusScope {
                     _detailReturnForceRefreshPending = false
                     _detailReturnDataRefreshDone = true
                 }
-                _syncPosterSources(); _updatePosterGate(); safeRestart(bgUpdateTimer)
+                // F2 : au premier affichage, ne pas attendre les 320 ms du
+                // debounce pour lancer la requête du backdrop. Le timer reste
+                // utile pour les rafraîchissements suivants (retour Player,
+                // retour PersonPage, changement d'item sur la même instance
+                // de page).
+                _syncPosterSources(); _updatePosterGate(); backdrop.updateBackdropNow()
                 if (castPageLoader.item) wireCastLoader()
                 if (similarLoader.item) wireSimilarLoader()
                 safeCallLater(function(){
@@ -1507,7 +1512,12 @@ FocusScope {
         initialAuthoritativeFetchPending = true
         _hydrateSensitiveContextFromShared()
         _consumeDetailReturnRefreshMarker("component-completed")
-        safeRestart(fetchDebounce)
+        // L'hydratation ci-dessus peut avoir déclenché plusieurs onXChanged et
+        // donc armé fetchDebounce. L'appel immédiat ci-dessous possède déjà le
+        // contexte final : supprimer ce doublon économise 80 ms au premier
+        // affichage (même correctif que detailSeriePage.qml).
+        fetchDebounce.stop()
+        fetchItemIfReady()
         safeCallLater(function(){
             uiReady = true
             if (rootFlick) rootFlick.contentY = 0
