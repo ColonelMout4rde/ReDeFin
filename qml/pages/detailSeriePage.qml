@@ -1266,7 +1266,12 @@ FocusScope {
     readonly property int bgW: 1280
     readonly property int bgH: 720
     property int bgBlur: 8
-    property real bgDarken: 0.40
+    // M4 : remplace l'ancienne image à 0,90 d'opacité surmontée d'un voile
+    // noir à 0,40 (bgDarken) par une seule couche équivalente. Sur un fond
+    // noir, composer un voile de a=0,40 sur une image déjà à b=0,90 donne
+    // (1-a)*b = 0,60*0,90 = 0,54 : même rendu, un remplissage alpha plein
+    // écran en moins par image affichée.
+    readonly property real bgOpacity: 0.54
     Timer { id: bgUpdateTimer; interval: 320; repeat: false; onTriggered: backdrop.updateBackdropNow() }
     function _updateBGGate(){
         if (gateBGReady) return;
@@ -1952,20 +1957,13 @@ FocusScope {
             onStatusChanged: {
                 if (loadToken !== backdrop._token) return;
                 if (status===Image.Ready) {
-                    backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=0.90; gateBGReady=true;
+                    backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=bgOpacity; gateBGReady=true;
                     DevLog.log("FICHE4", "bg-ready serie dt=" + (Date.now() - _ficheT0));
                 } else if (status===Image.Error) {
                     backdrop.loadingFull=""; opacity=0.0; gateBGReady=true;
                     DevLog.log("FICHE4", "bg-error serie dt=" + (Date.now() - _ficheT0));
                 }
             }
-        }
-        Rectangle {
-            anchors.fill: bgImg
-            z: bgImg.z + 1
-            color: "#000000"
-            opacity: bgDarken
-            visible: (bgImg.source && ("" + bgImg.source).length > 0) && bgDarken > 0.001
         }
         function computeFullUrl(){
             return item ? Jellyfin.itemBackdropOrPrimaryUrl(serverUrl, item, {

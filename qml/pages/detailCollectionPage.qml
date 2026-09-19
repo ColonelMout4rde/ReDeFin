@@ -187,7 +187,14 @@ FocusScope {
     property int bgBlur: 8
     property int bgFillW: 1280
     property int bgFillH: 720
-    property real bgDarken: 0.40
+    // M4 : remplace l'ancienne image à 0,95 d'opacité surmontée d'un voile
+    // noir à 0,40 (bgDarken) par une seule couche équivalente. Sur un fond
+    // noir, composer un voile de a=0,40 sur une image déjà à b=0,95 donne
+    // (1-a)*b = 0,60*0,95 = 0,57 : même rendu, un remplissage alpha plein
+    // écran en moins par image affichée. (Le reste de la fiche utilise
+    // 0,90 comme base, pas 0,95 : la valeur exacte de cette page diffère
+    // légèrement de l'hypothèse « idem film/série » de l'audit.)
+    readonly property real bgOpacity: 0.57
     readonly property int stickyBackdropDelayMs: 750
     readonly property int firstBackdropDelayMs: 180
     property var    bgOverrideItem: null
@@ -201,8 +208,6 @@ FocusScope {
     property string _bgUrlB: ""
     property string _bgRequestedUrl: ""
     property string _bgPromotedUrl: ""
-    readonly property string activeBackdropSource: _bgFrontA ? _bgUrlA : _bgUrlB
-    readonly property bool   activeBackdropVisible: activeBackdropSource.length > 0
     function _activeBackdropImage(){
         try { return _bgFrontA ? blurredBGA : blurredBGB } catch(e) { return null }
     }
@@ -1804,7 +1809,7 @@ FocusScope {
                 z: -2
                 fillMode: Image.PreserveAspectCrop
                 source: detailCollectionPage._bgUrlA
-                opacity: detailCollectionPage._bgFrontA ? 0.95 : 0.0
+                opacity: detailCollectionPage._bgFrontA ? detailCollectionPage.bgOpacity : 0.0
                 visible: opacity > 0.001 && ("" + source).length > 0
                 cache: false
                 asynchronous: true
@@ -1820,7 +1825,7 @@ FocusScope {
                 z: -1
                 fillMode: Image.PreserveAspectCrop
                 source: detailCollectionPage._bgUrlB
-                opacity: detailCollectionPage._bgFrontA ? 0.0 : 0.95
+                opacity: detailCollectionPage._bgFrontA ? 0.0 : detailCollectionPage.bgOpacity
                 visible: opacity > 0.001 && ("" + source).length > 0
                 cache: false
                 asynchronous: true
@@ -1829,13 +1834,6 @@ FocusScope {
                 onStatusChanged: detailCollectionPage._onBackdropImageChanged(blurredBGB, false)
                 onSourceChanged: detailCollectionPage._onBackdropImageChanged(blurredBGB, false)
                 Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-            }
-            Rectangle {
-                anchors.fill: parent
-                z: 0
-                color: "#000000"
-                opacity: bgDarken
-                visible: detailCollectionPage.activeBackdropVisible && bgDarken > 0.001
             }
             Flickable {
                 id: rootFlick
