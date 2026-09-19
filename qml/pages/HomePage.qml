@@ -27,6 +27,7 @@ import QtQuick 2.15
 import "../components" as Components
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
+import "../js/HomeGatePolicy.js" as HomeGatePolicy
 
 FocusScope {
     id: homePage
@@ -595,41 +596,73 @@ FocusScope {
                     + " sinceCreate=" + (_nowMs() - _t0))
     }
 
+    // Constat 2 de l'audit accueil (mission « accueil » lot 3) : la porte
+    // n'exige plus latestFetchCompleted (les 4 bibliothèques « Récemment
+    // ajouté »), qui ajoutait ~1,4 s après que Mes médias/Reprendre/À suivre
+    // ont déjà leurs données. Exception gardée : si une restauration de
+    // focus en attente vise la rangée Latest, on continue d'attendre ses
+    // données (voir postergrid.pendingFocusRestoreTargetsLatest()). L'ordre
+    // des vérifications et le nom des causes tracées viennent de
+    // HomeGatePolicy.canFinish(), module pur testé en Node
+    // (tests/js/homegatepolicy.test.js) : cette fonction se contente de lui
+    // fournir l'état et de déclencher les effets de bord (préparation du
+    // reveal, restauration du focus) au bon moment.
     function _canFinishGate() {
         var pg = posterGridLoader.item;
-        if (!pg) { _traceGateBlocked("no-postergrid"); return false; }
+        var pendingLatestFocus = false;
+        try {
+            pendingLatestFocus = !!(pg && pg.pendingFocusRestoreTargetsLatest
+                                     && pg.pendingFocusRestoreTargetsLatest());
+        } catch (eSnap) {}
 
-        // Jamais avant 1er fetch “confirmé”
-        if (!pg.fetchedOnce) { _traceGateBlocked("fetchedOnce"); return false; }
+        var earlyState = {
+            hasPosterGrid: !!pg,
+            fetchedOnce: !!(pg && pg.fetchedOnce),
+            libraryFetchCompleted: !!(pg && pg.libraryFetchCompleted),
+            resumeFetchCompleted: !!(pg && pg.resumeFetchCompleted),
+            nextUpFetchCompleted: !!(pg && pg.nextUpFetchCompleted),
+            latestFetchCompleted: !!(pg && pg.latestFetchCompleted),
+            pendingFocusRestoreTargetsLatest: pendingLatestFocus
+        };
+        var early = HomeGatePolicy.canFinish(earlyState);
+        if (!early.finish) { _traceGateBlocked(early.cause); return false; }
 
         if (_fetchedOnceAtMs === 0) {
             _fetchedOnceAtMs = _nowMs();
         }
 
-        if (pg.libraryFetchCompleted !== true) { _traceGateBlocked("libraryFetchCompleted"); return false; }
-        if (pg.resumeFetchCompleted !== true) { _traceGateBlocked("resumeFetchCompleted"); return false; }
-        if (pg.nextUpFetchCompleted !== true) { _traceGateBlocked("nextUpFetchCompleted"); return false; }
-        if (pg.latestFetchCompleted !== true) { _traceGateBlocked("latestFetchCompleted"); return false; }
-
-        if (!_preparePosterGridForReveal(fastHomeReturn ? "fast-return" : "initial")) {
-            _traceGateBlocked("homeRevealReady")
-            return false
-        }
-
-        if (_waitForHomePosters
-                && !_prepareHomePosterReturn(fastHomeReturn ? "fast-return-posters"
-                                                            : "external-return-posters")) {
-            _traceGateBlocked("waitForHomePosters")
-            return false
-        }
+        // À partir d'ici, postergrid a toutes les données requises : on peut
+        // déclencher (effet de bord) la préparation du focus avant reveal.
+        var revealReady = _preparePosterGridForReveal(fastHomeReturn ? "fast-return" : "initial");
 
         var now = _nowMs();
         var minGate = fastHomeReturn ? 0 : minLoadingMs
         var fetchedGate = fastHomeReturn ? 0 : afterFetchedOnceMinMs
         var stableGate = fastHomeReturn ? fastReturnSettleMs : settleMs
-        if ((now - _loadingStartMs) < minGate) { _traceGateBlocked("minLoadingMs"); return false; }
-        if ((now - _fetchedOnceAtMs) < fetchedGate) { _traceGateBlocked("afterFetchedOnceMinMs"); return false; }
-        if ((now - _lastChangeMs) < stableGate) { _traceGateBlocked("settleMs"); return false; }
+
+        var timedState = {
+            hasPosterGrid: true,
+            fetchedOnce: true,
+            libraryFetchCompleted: true,
+            resumeFetchCompleted: true,
+            nextUpFetchCompleted: true,
+            latestFetchCompleted: earlyState.latestFetchCompleted,
+            pendingFocusRestoreTargetsLatest: pendingLatestFocus,
+            revealReady: revealReady,
+            waitForHomePosters: _waitForHomePosters,
+            postersReady: _waitForHomePosters
+                    ? _prepareHomePosterReturn(fastHomeReturn ? "fast-return-posters"
+                                                              : "external-return-posters")
+                    : false,
+            sinceLoadingStartMs: now - _loadingStartMs,
+            sinceFetchedOnceMs: now - _fetchedOnceAtMs,
+            sinceLastChangeMs: now - _lastChangeMs,
+            minLoadingMs: minGate,
+            afterFetchedOnceMinMs: fetchedGate,
+            settleMs: stableGate
+        };
+        var result = HomeGatePolicy.canFinish(timedState);
+        if (!result.finish) { _traceGateBlocked(result.cause); return false; }
 
         return true;
     }

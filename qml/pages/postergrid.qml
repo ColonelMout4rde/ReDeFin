@@ -475,6 +475,19 @@ Item {
     }
     function hasPendingFocusRestore(){ return _snapshotNeedsRestore(_focusSnapshot()); }
 
+    // Instrumentation HOME1 (mission « accueil » lot 3) : la porte de
+    // HomePage n'exige plus latestFetchCompleted, SAUF quand une
+    // restauration de focus en attente vise la rangée « Récemment ajouté »
+    // (focusSection 3 dans le snapshot) — sans les données Latest, on ne
+    // saurait ni où replacer le focus ni éviter qu'il saute une fois la
+    // rangée remplie. Utilisé par HomeGatePolicy.canFinish() via
+    // HomePage._canFinishGate().
+    function pendingFocusRestoreTargetsLatest() {
+        var snap = _focusSnapshot()
+        if (!_snapshotNeedsRestore(snap)) return false
+        return Math.max(0, Math.min(3, snap.focusSection || 0)) === 3
+    }
+
     function consumeFocusSnapshotKeepState() {
         var snap = _focusSnapshot()
         if (!snap) return false
