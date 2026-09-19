@@ -20,6 +20,7 @@ import "../components" as Components
 import "../js/clientId.js" as ClientId
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
+import "../js/PageCurtainPolicy.js" as PageCurtainPolicy
 
 FocusScope {
     id: shell
@@ -202,25 +203,23 @@ FocusScope {
     // Loader.Ready signifie seulement que l'objet QML existe. Certaines pages
     // arment leur vrai état de chargement dans le même tour ou juste après
     // (restauration de grille, fetch Jellyfin, backdrop, focus). On garde donc
-    // le curtain jusqu'à ce que l'état "prêt" soit stable plusieurs probes.
+    // le curtain jusqu'à ce que l'état "prêt" soit stable plusieurs probes —
+    // SAUF si la page a explicitement déclaré shellLoading=true puis false :
+    // dans ce cas on sait que son chargement est fini, donc on lève au tout
+    // premier tick (règle F4, audit shell). La décision est déléguée à
+    // qml/js/PageCurtainPolicy.js (module pur, testé dans
+    // tests/js/pagecurtainpolicy.test.js) ; ShellPage ne fait que conserver
+    // l'état entre deux ticks et appliquer le verdict.
     property double _pageCurtainReadySinceMs: 0
-    property int _pageCurtainStableTicks: 0
     readonly property int pageCurtainReadyMinHoldMs: 180
     readonly property int pageCurtainStableTicksRequired: 2
-
-    // Instrumentation NAV4 (mesure seule, aucun effet sur le délai de levée
-    // actuel) : détecte quand la page, ayant déclaré shellLoading=true, le
-    // repasse à false. _pageCurtainNav4LoggedSeq évite de journaliser deux
-    // fois la même transition pour une même séquence de rideau.
-    property bool _pageCurtainSawLoadingTrue: false
-    property int _pageCurtainNav4LoggedSeq: -1
+    property var _pageCurtainPolicyState: PageCurtainPolicy.createState()
 
     function _beginPageCurtainTransition() {
         _pageLoadCurtainSeq = (_pageLoadCurtainSeq + 1) | 0
         _pageLoadCurtainHold = true
         _pageCurtainReadySinceMs = 0
-        _pageCurtainStableTicks = 0
-        _pageCurtainSawLoadingTrue = false
+        _pageCurtainPolicyState = PageCurtainPolicy.createState()
         try { pageCurtainReleaseTimer.stop() } catch(e0) {}
     }
 
@@ -236,7 +235,13 @@ FocusScope {
         if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) return
         if (!(_pageCurtainReadySinceMs > 0))
             _pageCurtainReadySinceMs = Date.now()
-        _pageCurtainStableTicks = 0
+        // Repart avec des ticks stables à zéro (peut être ré-appelé après
+        // Ready, depuis _onPageLoaded), mais garde la mémoire d'une éventuelle
+        // déclaration shellLoading déjà vue depuis _beginPageCurtainTransition.
+        _pageCurtainPolicyState = {
+            sawLoadingTrue: _pageCurtainPolicyState.sawLoadingTrue === true,
+            stableTicks: 0
+        }
         pageCurtainReleaseTimer.curtainSeq = seq
         if (!pageCurtainReleaseTimer.running)
             pageCurtainReleaseTimer.start()
@@ -254,44 +259,38 @@ FocusScope {
                 return
             }
             if (!pageLoader || pageLoader.status !== Loader.Ready || !pageLoader.item) {
-                shell._pageCurtainStableTicks = 0
                 return
             }
 
-            // NAV4 (instrumentation seule) : la page a déclaré shellLoading vrai
-            // puis faux. Ne change rien au délai de levée ci-dessous.
-            if (shell._pageReportedLoading) {
-                shell._pageCurtainSawLoadingTrue = true
-            } else if (shell._pageCurtainSawLoadingTrue &&
-                       shell._pageCurtainNav4LoggedSeq !== curtainSeq) {
-                shell._pageCurtainNav4LoggedSeq = curtainSeq
+            var verdict = PageCurtainPolicy.evaluate(shell._pageCurtainPolicyState, {
+                pageLoading: shell._pageReportedLoading,
+                elapsedSinceReadyMs: Date.now() - Number(shell._pageCurtainReadySinceMs || 0),
+                minHoldMs: shell.pageCurtainReadyMinHoldMs,
+                stableTicksRequired: shell.pageCurtainStableTicksRequired
+            })
+            shell._pageCurtainPolicyState = verdict.state
+
+            // NAV4 : la page vient de déclarer la fin de SON chargement
+            // (shellLoading vrai puis faux), indépendamment de la levée du
+            // rideau elle-même (NAV5, plus bas, qui suit immédiatement dans
+            // ce cas puisque verdict.release est alors déjà vrai).
+            if (verdict.reason === "declared-done" && DevLog.ENABLED) {
+                DevLog.log("NAV4", "loaded dt=" + (Date.now() - shell._navT0) +
+                           " page=" + shell._baseOf(shell.currentPage).toLowerCase())
+            }
+
+            if (!verdict.release) return
+
+            stop()
+            if (curtainSeq === shell._pageLoadCurtainSeq &&
+                    pageLoader.status === Loader.Ready &&
+                    !shell._pageReportedLoading) {
+                shell._pageLoadCurtainHold = false
+                shell._homeLaunchPending = false
                 if (DevLog.ENABLED)
-                    DevLog.log("NAV4", "loaded dt=" + (Date.now() - shell._navT0) +
-                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
-            }
-
-            var elapsed = Date.now() - Number(shell._pageCurtainReadySinceMs || 0)
-            if (elapsed < shell.pageCurtainReadyMinHoldMs)
-                return
-
-            if (shell._pageReportedLoading) {
-                shell._pageCurtainStableTicks = 0
-                return
-            }
-
-            shell._pageCurtainStableTicks++
-            if (shell._pageCurtainStableTicks >= shell.pageCurtainStableTicksRequired) {
-                stop()
-                if (curtainSeq === shell._pageLoadCurtainSeq &&
-                        pageLoader.status === Loader.Ready &&
-                        !shell._pageReportedLoading) {
-                    shell._pageLoadCurtainHold = false
-                    shell._homeLaunchPending = false
-                    if (DevLog.ENABLED)
-                        DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
-                                   " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
-                                   " reason=stable-hold")
-                }
+                    DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
+                               " reason=" + verdict.reason)
             }
         }
     }
@@ -2160,7 +2159,7 @@ FocusScope {
                 shell._pageLoadCurtainHold = false
                 shell._homeLaunchPending = false
                 shell._pageCurtainReadySinceMs = 0
-                shell._pageCurtainStableTicks = 0
+                shell._pageCurtainPolicyState = PageCurtainPolicy.createState()
                 try { pageCurtainReleaseTimer.stop() } catch(e0) {}
                 if (DevLog.ENABLED)
                     DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +

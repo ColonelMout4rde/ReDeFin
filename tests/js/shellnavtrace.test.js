@@ -52,12 +52,13 @@ test('chaque DevLog.log(...) de ShellPage.qml est gardé par if (DevLog.ENABLED)
     // explique la convention) : seul un véritable appel nous intéresse.
     if (/^\s*\/\//.test(line)) return;
     if (!/DevLog\.log\(/.test(line)) return;
-    // Le garde peut être sur la ligne précédente (if (DevLog.ENABLED)\n DevLog.log(...))
-    // ou sur la même ligne.
+    // Le garde peut être sur la ligne précédente (if (DevLog.ENABLED)\n DevLog.log(...)),
+    // sur la même ligne, ou composé avec une autre condition
+    // (if (cond && DevLog.ENABLED) { ... DevLog.log(...) }).
     const window = lines.slice(Math.max(0, i - 1), i + 1).join('\n');
     assert.match(
       window,
-      /if\s*\(\s*DevLog\.ENABLED\s*\)/,
+      /if\s*\([^)]*\bDevLog\.ENABLED\b[^)]*\)/,
       `ligne ${i + 1} : DevLog.log(...) sans garde "if (DevLog.ENABLED)" à proximité :\n${lines[i]}`
     );
   });
