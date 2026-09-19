@@ -939,11 +939,19 @@ FocusScope {
     // settle/warmup/logo/bg/details précédente. Le temps qu'un Loader
     // asynchrone (rangée d'épisodes) republie sa géométrie, pas plus.
     property bool _revealLayoutStable: false
+    // Lot 3 (MESURES.md « page saison ») : une trace par condition de
+    // revealReady(), une seule fois par cycle de rideau, pour voir laquelle
+    // retient encore la levée sans avoir à deviner depuis les anciennes
+    // minuteries (posterWarmup/bgActive/layoutSettle, qui ne gardent plus le
+    // rideau mais continuent leur propre trace pour leurs autres usages).
+    property bool _saison5FirstFrameLogged: false
+    property bool _saison5RowSettledLogged: false
     Timer {
         id: revealLayoutStabilityTimer
         interval: Math.max(0, SeasonRevealPolicy.LAYOUT_STABILITY_MS)
         repeat: false
         onTriggered: {
+            DevLog.log("SAISON5", "step=layoutStable dt=" + (Date.now() - _saisonT0));
             _revealLayoutStable = true;
             _tickVisualReveal();
         }
@@ -1022,6 +1030,7 @@ FocusScope {
         if (disposed) return;
         DevLog.log("SAISON5", "step=armVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         _visualRevealReturnMode = returnMode === true; _visualRevealStartedMs = Date.now(); visualRevealPending = true;
+        _saison5FirstFrameLogged = false; _saison5RowSettledLogged = false;
         _revealLayoutStable = false; revealLayoutStabilityTimer.restart();
         visualRevealSettleTimer.stop(); visualRevealPollTimer.restart(); visualRevealHardTimer.restart();
     }
@@ -1041,6 +1050,10 @@ FocusScope {
     function _tickVisualReveal(){
         if (!visualRevealPending || disposed) return;
         if (isLoading) { visualRevealPollTimer.restart(); return; }
+        if (!_saison5RowSettledLogged && _visualEpisodesRowSettled()) {
+            _saison5RowSettledLogged = true;
+            DevLog.log("SAISON5", "step=episodesRowSettled dt=" + (Date.now() - _saisonT0));
+        }
         var elapsed = Math.max(0, Date.now() - Number(_visualRevealStartedMs || 0));
         var minHold = _visualRevealReturnMode ? visualRevealReturnMinMs : visualRevealInitialMinMs;
         if (elapsed >= minHold && _visualAssetsSettled()) {
@@ -1178,7 +1191,13 @@ FocusScope {
             });
         }
     }
-    onPostFirstFrameChanged: if (visualRevealPending) visualRevealPollTimer.restart()
+    onPostFirstFrameChanged: {
+        if (postFirstFrame && !_saison5FirstFrameLogged) {
+            _saison5FirstFrameLogged = true;
+            DevLog.log("SAISON5", "step=postFirstFrame dt=" + (Date.now() - _saisonT0));
+        }
+        if (visualRevealPending) visualRevealPollTimer.restart();
+    }
     onLayoutSettleChanged: if (visualRevealPending) visualRevealPollTimer.restart()
     onInitialWarmupChanged: if (visualRevealPending) visualRevealPollTimer.restart()
 
