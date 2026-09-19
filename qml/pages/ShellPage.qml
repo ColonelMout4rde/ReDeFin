@@ -2085,11 +2085,26 @@ FocusScope {
         }
 
         if (baseNow === "homepage.qml" && shell.saveSettingsRequested) {
-            shell.saveSettingsRequested({
-                serverUrl: shell.sessionServerUrl || "",
-                lastUserId: shell.sessionUserId || "",
-                lastUserName: shell.sessionUserName || ""
-            })
+            // F8 (audit shell) : HomePage se charge à chaque retour à
+            // l'accueil ; sans cette comparaison, les trois mêmes valeurs
+            // étaient renvoyées à chaque fois, ce qui fait réécrire
+            // fbx.application.Settings (E/S synchrone potentielle) même sans
+            // aucun changement réel de session.
+            var nextServerUrl = shell.sessionServerUrl || ""
+            var nextUserId = shell.sessionUserId || ""
+            var nextUserName = shell.sessionUserName || ""
+            var s = shell.settings
+            var changed = !s
+                    || s.serverUrl !== nextServerUrl
+                    || s.lastUserId !== nextUserId
+                    || s.lastUserName !== nextUserName
+            if (changed) {
+                shell.saveSettingsRequested({
+                    serverUrl: nextServerUrl,
+                    lastUserId: nextUserId,
+                    lastUserName: nextUserName
+                })
+            }
         }
     }
 
