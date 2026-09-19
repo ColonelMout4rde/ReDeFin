@@ -215,11 +215,18 @@ Item {
                 return
             }
             if (postergrid._restoringFocus || postergrid._focusRestorePending) {
+                // Instrumentation HOME1 : ce report était silencieux ; sur le
+                // premier affichage il ne doit normalement jamais se
+                // produire (pas de snapshot à restaurer), voir mission
+                // « accueil » lot 2, constat 2 de l'audit.
+                if (DevLog.ENABLED) DevLog.log("HOME1", "reveal-timer deferred restoringFocus=" + postergrid._restoringFocus
+                            + " focusRestorePending=" + postergrid._focusRestorePending + " dt=" + (Date.now() - _t0))
                 restart()
                 return
             }
             postergrid._homeRevealPrepareActive = false
             postergrid._homeRevealReady = true
+            if (DevLog.ENABLED) DevLog.log("HOME1", "reveal-timer fired dt=" + (Date.now() - _t0))
         }
     }
     function _armHomeRevealReady(){ _homeRevealReady = false; homeRevealReadyTimer.restart(); }
@@ -238,6 +245,14 @@ Item {
         _homeRevealPrepareActive = true
         _homeRevealReady = false
         var snap = _focusSnapshot()
+        // Instrumentation HOME1 (mission « accueil » lot 2, point 1) : seule
+        // entrée qui décide comment placer le focus avant de lever le
+        // rideau. hasSnap distingue le premier affichage (aucun snapshot,
+        // forceFirstFocus) du retour/relance (snapshot présent, réparation
+        // ou restauration) : les deux chemins n'ont pas le même coût.
+        if (DevLog.ENABLED) DevLog.log("HOME1", "prepareHomeReveal reason=" + (reason || "?")
+                    + " hasSnap=" + (!!snap) + " needsRestore=" + _snapshotNeedsRestore(snap)
+                    + " dt=" + (Date.now() - _t0))
         if (_snapshotNeedsRestore(snap)) {
             restoreFocusSnapshot()
             return false
@@ -756,7 +771,15 @@ Item {
         return (!!(libraryItems && libraryItems.length > 0) || !!(resumeItems && resumeItems.length > 0) || !!(nextUpItems && nextUpItems.length > 0) || !!(latestByFolder && latestByFolder.length > 0))
     }
     function _restartHomeImageSettle(){ try { if (_homeImagesReady && _hasVisibleHomeData()) return; _homeImagesReady=false; homeImageSettleTimer.restart() } catch(e) {} }
-    Timer { id: homeImageSettleTimer; interval: postergrid.homeImageSettleMs; repeat: false; onTriggered: postergrid._homeImagesReady = true }
+    Timer { id: homeImageSettleTimer; interval: postergrid.homeImageSettleMs; repeat: false; onTriggered: {
+        postergrid._homeImagesReady = true
+        // Instrumentation HOME1 (mission « accueil » lot 2, point 1) :
+        // _homeImagesReady conditionne cardAllowLoad (_homeImageLoadGate) —
+        // avant ce top, aucune carte ne commence à charger son image. Dater
+        // ce top permet de savoir si le décodage des affiches démarre avant
+        // ou après homeRevealReady sur le premier affichage.
+        if (DevLog.ENABLED) DevLog.log("HOME1", "homeImagesReady=true dt=" + (Date.now() - _t0))
+    } }
     Timer { id: homeImageReturnFreezeTimer; interval: postergrid.homeImageReturnFreezeMs; repeat: false; onTriggered: { postergrid._homeImageReturnFreeze = false; postergrid._homeCurtainWarmupLatched = false; postergrid._scheduleHomePosterVisualProbe() } }
     function _freezeHomeImagesOnReturn() {
         try {
@@ -1586,10 +1609,24 @@ Item {
     }
     function _publishLatestFromTemp() {
         var out = []
+        var cardCount = 0
         for (var i=0; i<postergrid._latestTemp.length; i++) {
             var e = postergrid._latestTemp[i]
-            if (e && ((e.items && e.items.length > 0) || (e._evicted && e._hadItems))) out.push(e)
+            if (e && ((e.items && e.items.length > 0) || (e._evicted && e._hadItems))) {
+                out.push(e)
+                cardCount += e.items ? e.items.length : 0
+            }
         }
+        // Instrumentation HOME1 (mission « accueil » lot 2, point 1) : seul
+        // point de publication de latestByFolder avant le premier reveal
+        // (constat 1 de l'audit). C'est ici que le Repeater des rangées «
+        // Récemment ajouté » matérialise en une fois tous ses délégués :
+        // dater ce moment permet de vérifier sur boîtier si le coût observé
+        // entre la dernière réponse réseau et homeRevealReady vient de cette
+        // création de délégués/décodage d'affiches plutôt que d'une porte
+        // explicite (aucune n'a été trouvée en lecture de code).
+        if (DevLog.ENABLED) DevLog.log("HOME1", "latestByFolder publish groups=" + out.length
+                    + " cards=" + cardCount + " dt=" + (Date.now() - _t0))
         postergrid._setLatestByFolderIfChanged(out)
         var inds = (postergrid.latestIndicesByGroup && postergrid.latestIndicesByGroup.slice) ? postergrid.latestIndicesByGroup.slice(0) : []
         while (inds.length < out.length) inds.push(0)
