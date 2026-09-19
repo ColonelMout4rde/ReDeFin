@@ -298,6 +298,15 @@ if [ "${RUN_TESTS}" -eq 1 ]; then
         # On liste donc explicitement les fichiers de test, ce qui est
         # équivalent et fonctionne de façon fiable partout.
         if node --test "${NODE_TEST_FILES[@]}"; then
+            # Node range sous « failing tests » les tests marqués todo (signe
+            # ⚠, suffixe « # ... ») : ce sont des défauts connus du code
+            # upstream, documentés par le test, et ils ne font PAS échouer la
+            # suite (voir tests/README.md). Seul le compteur « fail » compte.
+            # testhygiene.test.js parle des todo sans en contenir.
+            if grep -lE "\btodo[[:space:]]*:" "${NODE_TEST_FILES[@]}" 2>/dev/null | grep -qv "testhygiene"; then
+                echo "Note : les tests ⚠ listés ci-dessus sous « failing tests » sont des"
+                echo "       todo (défauts upstream connus) ; la couche Node est réussie."
+            fi
             record_step "Tests Node (tests/js)" 0
         else
             record_step "Tests Node (tests/js)" 1
