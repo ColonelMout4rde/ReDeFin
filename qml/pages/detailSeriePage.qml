@@ -4,6 +4,7 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/DevLog.js" as DevLog
+import "../js/DetailGatePolicy.js" as DetailGatePolicy
 FocusScope {
     id: detailSeriePage
     width: parent ? parent.width : 1280
@@ -1043,10 +1044,16 @@ FocusScope {
             return;
         }
         try {
-            if (nextUpLoader.status === Loader.Error) gateNextUpReady = true;
-            else if (heavyStageNextUp && nextUpLoader.status === Loader.Ready && nextUpLoader.item) {
-                if ((nextUpLoader.height|0) > 0) gateNextUpReady = true;
-            }
+            var nextUpStatus = "loading";
+            if (nextUpLoader.status === Loader.Error) nextUpStatus = "error";
+            else if (heavyStageNextUp && nextUpLoader.status === Loader.Ready) nextUpStatus = "ready";
+            if (DetailGatePolicy.nextUpGateReleased({
+                    loaderStatus: nextUpStatus,
+                    blockReady: !!(nextUpLoader.item && nextUpLoader.item.ready),
+                    hasContent: !!(nextUpLoader.item && nextUpLoader.item.hasContent),
+                    height: nextUpLoader.height|0
+                }))
+                gateNextUpReady = true;
         } catch(e1) {}
         try {
             gateSeasonsBlockReady = seasonsBlockFullyReady
@@ -2720,6 +2727,12 @@ FocusScope {
             _schedulePokeRestore();
             if (_playerNextUpRestorePending) _schedulePlayerNextUpRestore(24);
         }
+        // F1 : une requête NextUp terminée SANS contenu (série entièrement
+        // vue) ne déclenche jamais onHasContentChanged (hasContent reste à
+        // false) ni de hauteur > 0. Sans ce relais, seul le timeout de
+        // secours (2600 ms) libérait la garde. DetailGatePolicy.nextUpGateReleased()
+        // couvre ce cas dès que NextUpBlock.ready passe à true.
+        onReadyChanged: _updateExtendedSectionGates()
         onCurrentIndexChanged: { requestSaveFocusSnapshot(); _updateNextUpMeta(); }
         onActiveFocusChanged: {
             if (target && target.activeFocus) {
