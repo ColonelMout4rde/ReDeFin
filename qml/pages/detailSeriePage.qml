@@ -1729,6 +1729,11 @@ FocusScope {
                     seasonsLoader.item.serverUrl = serverUrl
                     SeasonUtils.applyBlockPerf(seasonsLoader.item)
                 }
+                // Point 4 : si NextUpBlock a déjà été chargé (fetchSeasons
+                // tourne en parallèle de l'item, F3), lui relayer la réponse
+                // au cas où son propre wiring a eu lieu avant elle.
+                if (nextUpLoader.item && nextUpLoader.item.hasOwnProperty("seasonsHint"))
+                    nextUpLoader.item.seasonsHint = seasons
 
                 Qt.callLater(function(){
                     _updateExtendedSectionGates()
@@ -2930,6 +2935,11 @@ FocusScope {
         it.fbx=fbx;
         if (it.hasOwnProperty("fallbackPosterUrl")) it.fallbackPosterUrl = fallbackPosterUrl;
         if (it.hasOwnProperty("seriesScopedOnly")) it.seriesScopedOnly = true;
+        // F3/point 4 : cette page a déjà (ou aura sous peu, en parallèle) la
+        // liste /Seasons ; la lui passer évite au rail un second GET
+        // identique pour sa barre de position saison (voir fetchSeasons()
+        // plus haut pour le relais si la réponse arrive après ce wiring).
+        if (it.hasOwnProperty("seasonsHint")) it.seasonsHint = seasonsFetched ? seasons : null;
         try {
             var restoreSnap = _getFocusSnapshot();
             var restoreId = preselectEpisodeId
