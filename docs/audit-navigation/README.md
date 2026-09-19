@@ -83,6 +83,38 @@ Enseignements :
 - Le `ListModel` des grilles n'aiderait pas l'ouverture (45 items = une seule
   page) : le coût est la création des délégués visibles.
 
+## Deuxième mesure sur Révolution (19 septembre 2026, après le correctif F1)
+
+| Navigation | Mesure 1 | Mesure 2 |
+| --- | --- | --- |
+| Fiche série déjà visitée (autre série ou retour) | 2,5 s | **0,44 – 0,52 s** |
+| Fiche film, à partir de la 2ᵉ | 2,6 s | **0,87 – 1,0 s** |
+| Retour à une grille | 2,2 – 2,4 s | **1,23 – 1,44 s** |
+| Page saison (1ʳᵉ visite, compilation comprise) | 3,4 s | 2,6 s |
+| Accueil au démarrage | 5,6 s | 5,3 s |
+| Retour à l'accueil | — | **3,65 – 3,7 s** |
+
+Plus aucun fichier de page n'est redemandé après la première visite de son
+type ; celle-ci paie toujours 1,4 à 2 s de compilation, une fois par session.
+
+Ce que ce relevé a montré, et ce qui en a été fait (lot 3) :
+
+- **Retour à l'accueil, 3,7 s** alors que la page est construite en 90 ms :
+  1,3 s de blocage à l'application du cache (recréation synchrone des cartes),
+  1,5 s de restauration du focus et de minuteries, 0,5 s d'attente des affiches.
+  → accueil résident (`HomeResidency.js`, shell F2).
+- **Accueil au démarrage** : les trois premières rangées ont leurs données à
+  2,3 s, le rideau attendait ensuite les quatre bibliothèques « Récemment
+  ajouté » (+1,4 s) puis leur création (+1,36 s de thread UI bloqué, 135
+  cartes). → porte sans Latest (`HomeGatePolicy.js`), publication unique.
+  Le blocage de création existe toujours, désormais après l'affichage.
+- **Grille, 1,3 s au retour** : 0,09 construction, 0,19 avant la requête, 0,26
+  réseau, 0,5 création des vignettes, 0,25 stabilité. → cache de fenêtre,
+  requête sans anti-rebond, sondage de stabilité à 50 ms. Reste le coût des
+  vignettes.
+- **Page saison** : épisodes prêts à 130 ms, rideau levé à 990 ms. → plancher
+  de 350 ms supprimé, délégué de l'épisode cible exigé.
+
 ## État des constats
 
 Traité (lot 1, correctifs ponctuels, un commit et un test chacun) :
@@ -101,15 +133,18 @@ armé explicitement), portes « À suivre » / Saisons / Distribution / Similair
 sorties du rideau des fiches, « visual reveal » de la page saison réduit à la
 stabilité de mise en page, `NextUpBlock` qui ne redemande plus `/Seasons`.
 
+Traité (lot 3, après la deuxième mesure) : shell F2 (accueil résident), porte de
+l'accueil sans « Récemment ajouté », réseau F1 (cache de la dernière fenêtre de
+grille), départ immédiat de la requête de grille, plancher de la page saison.
+
 Restant (changements structurants, à décider avec des mesures en main) :
 
-- shell F2 : accueil résident dans un second `Loader` — à réévaluer : depuis le
-  correctif F1 une page déjà compilée se reconstruit en ~0,1 s.
-- accueil : les 2 s entre la dernière réponse et la révélation (voir mesure).
+- accueil : création d'un bloc des sections « Récemment ajouté » (~1,4 s de gel) ;
+  l'hydratation par proximité est inerte au démarrage car chaque enfant du
+  `Column` lit `y = 0` à sa création.
 - grilles : 0,5 à 0,7 s de création des vignettes à l'ouverture d'une grille.
 - grilles F2 / réseau M3 : `ListModel` incrémental au lieu du tableau JS réaffecté.
-- réseau F1 : cache de la dernière fenêtre de grille ; fiches F6 / réseau M4 :
-  snapshot et cache des fiches (boutons désarmés jusqu'à la lecture autoritaire).
+- fiches F6 / réseau M4 : snapshot et cache des fiches (boutons désarmés jusqu'à la lecture autoritaire).
 - accueil constat 3 (cache périmé affiché puis revalidé) et constat 8 (`_navBusy`).
 - limiteur d'auto-répétition de la télécommande (toutes les zones).
 - passes « HQ » des images (M5),

@@ -47,9 +47,10 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
 - **Navigation dans les menus nettement plus rapide.** Principe nouveau : une
   page s'affiche dès qu'elle est utilisable et ses images arrivent ensuite en
   fondu, au lieu d'attendre derrière l'indicateur de chargement que tout soit
-  décodé. *Un premier relevé sur Révolution a confirmé le sens des gains ; les
-  derniers changements (pages déjà visitées, fiche série, page saison) restent
-  à mesurer.*
+  décodé. *Relevés sur Révolution : une fiche série déjà visitée passe de 2,5 s
+  à 0,5 s, une fiche film de 2,6 s à 0,9 s, le retour à une bibliothèque de
+  2,3 s à 1,3 s. Les derniers changements (accueil conservé en mémoire, accueil
+  au démarrage, cache des bibliothèques, page saison) restent à mesurer.*
   - **Toutes les pages** : une page d'un type déjà visité (deuxième fiche,
     retour à une bibliothèque, à l'accueil) n'est plus recompilée à chaque
     fois. Mesuré sur Révolution : 1,1 à 1,6 s de construction par navigation,
@@ -57,12 +58,21 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
     chargement se lève en outre dès que la page a fini de charger (jusqu'à
     240 ms de moins), et son animation allégée laisse le processeur à la page
     en construction.
-  - **Accueil** : environ une seconde d'attente fixe en moins après la
-    dernière réponse du serveur ; au retour sur l'accueil, les affiches ne
+  - **Retour à l'accueil** : l'accueil reste en mémoire pendant la visite
+    d'une bibliothèque ou d'une fiche et réapparaît sans être reconstruit
+    (mesuré à 3,7 s avant ce changement). Il est toujours libéré pendant la
+    lecture d'une vidéo et au changement de profil.
+  - **Accueil au démarrage** : affiché dès que « Mes médias », « Reprendre » et
+    « À suivre » sont prêts ; les rangées « Récemment ajouté » arrivent
+    ensuite, en une seule fois. Environ une seconde d'attente fixe en moins
+    après la dernière réponse du serveur ; au retour sur l'accueil, les affiches ne
     retiennent plus l'affichage au-delà de 300 ms ; remonter vers une rangée
     « Récemment ajouté » éloignée n'affiche plus « Rechargement… ».
-  - **Bibliothèques** : le retour depuis une fiche n'impose plus 1,1 s de
-    stabilisation ; glissement plus régulier dans les grandes grilles, la
+  - **Bibliothèques** : au retour depuis une fiche, la grille déjà consultée
+    s'affiche tout de suite depuis la mémoire, puis se met à jour si quelque
+    chose a changé (vu, reprise, nouveaux titres) ; ce retour n'impose plus
+    1,1 s de stabilisation ; la première ouverture envoie sa requête sans
+    délai ; glissement plus régulier dans les grandes grilles, la
     rangée suivante est prête avant la fin du glissement ; les informations
     techniques du titre sélectionné se chargent par une requête bien plus
     légère.
@@ -74,8 +84,9 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
     durée moyenne des épisodes ne télécharge plus la liste complète des
     épisodes à chaque ouverture (elle peut être légèrement moins exacte).
   - **Page d'une saison** : affichée dès que les épisodes sont prêts, sans
-    attendre le logo, le fond ni la fiche détaillée de l'épisode (environ
-    1,5 s de moins attendues).
+    attendre le logo, le fond ni la fiche détaillée de l'épisode, et sans
+    délai minimal d'affichage du chargement ; les flèches répondent dès
+    l'ouverture.
   - **Serveur moins sollicité** : les listes ne demandent plus que les types
     d'images réellement affichés ; l'avatar du profil est demandé à sa taille
     d'affichage au lieu du fichier d'origine ; les affiches de l'accueil sont
