@@ -16,7 +16,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-    SRV_A, SRV_B, makeStore, freshStore, storedUsers,
+    SRV_A, SRV_B, makeSettings, makeStore, freshStore, storedUsers,
 } = require('./userstoreharness');
 
 function ids(list) {
@@ -44,16 +44,63 @@ test('les écritures d\'une même URL serveur convergent vers un seul profil', (
     assert.equal((Store.listServers() || []).length, 1);
 });
 
-test({ todo: 'BUG : jellyfinBridge.normalizeServerUrl() ne met pas l\'autorité '
-           + 'en minuscules (jellyfinBridge.js:835), donc « HTTP://Host » et '
-           + '« http://host » créent deux profils et deux sessions.' },
-'la casse du schéma et de l\'hôte ne dédouble pas un serveur', () => {
+test('la casse du schéma et de l\'hôte ne dédouble pas un serveur', () => {
     const { Store } = freshStore();
     Store.addOrUpdateUser({ serverUrl: 'http://192.168.51.10:8096', userId: 'u1' });
     Store.addOrUpdateUser({ serverUrl: 'HTTP://192.168.51.10:8096', userId: 'u1' });
 
     assert.equal((Store.listUsers() || []).length, 1);
     assert.equal((Store.listServers() || []).length, 1);
+    assert.equal(Store.listUsers()[0].serverUrl, 'http://192.168.51.10:8096');
+
+    // Le token de session suit la même clé, quelle que soit la casse saisie.
+    Store.addOrUpdateUser({ serverUrl: 'HTTP://192.168.51.10:8096', userId: 'u1',
+                            accessToken: 'tok-CASSE' });
+    assert.equal(Store.listUsers('http://192.168.51.10:8096')[0].accessToken, 'tok-CASSE');
+});
+
+test('le chemin d\'un reverse-proxy garde sa casse, l\'autorité non', () => {
+    const { Store } = freshStore();
+    // Jellyfin publié sur un sous-chemin : celui-ci peut être sensible à la
+    // casse côté proxy, il ne doit donc jamais être abaissé.
+    Store.addOrUpdateUser({ serverUrl: 'HTTP://NAS.local:8096/Jellyfin', userId: 'u1' });
+    assert.equal(Store.listUsers()[0].serverUrl, 'http://nas.local:8096/Jellyfin');
+
+    // Deux sous-chemins de casse différente restent deux serveurs distincts.
+    Store.addOrUpdateUser({ serverUrl: 'http://nas.local:8096/jellyfin', userId: 'u1' });
+    assert.equal((Store.listServers() || []).length, 2);
+});
+
+test('un profil déjà stocké avec une autorité en majuscules est retrouvé', () => {
+    // Store écrit par une version antérieure à la normalisation de la casse :
+    // l'entrée doit être reprise telle quelle, pas dédoublée ni orpheline.
+    const legacy = JSON.stringify([{
+        serverUrl: 'HTTP://192.168.51.10:8096', userId: 'u1', userName: 'Alice',
+        accessToken: '', remember: true, lastUsed: 1699999999000, prefs: {},
+    }]);
+    const legacyServers = JSON.stringify([{
+        serverUrl: 'HTTP://192.168.51.10:8096', url: 'HTTP://192.168.51.10:8096',
+        name: 'Maison', version: '10.9.0', id: 'srv-1', lastUsed: 1699999999000,
+    }]);
+    const settings = makeSettings({ usersJson: legacy, usersServersJson: legacyServers });
+    const Store = makeStore(settings);
+
+    // Relu, donc renormalisé : un seul profil, un seul serveur, forme canonique.
+    assert.equal((Store.listUsers() || []).length, 1);
+    assert.equal(Store.listUsers()[0].serverUrl, SRV_A);
+    assert.equal(Store.listUsers()[0].userName, 'Alice');
+    assert.equal((Store.listServers() || []).length, 1);
+    assert.equal(Store.listServers()[0].serverUrl, SRV_A);
+
+    // Retrouvé par l'ancienne comme par la nouvelle écriture de l'URL.
+    assert.equal(ids(Store.listUsers(SRV_A)), 'u1');
+    assert.equal(ids(Store.listUsers('HTTP://192.168.51.10:8096')), 'u1');
+
+    // Une reconnexion sur la forme canonique met à jour le profil existant.
+    Store.addOrUpdateUser({ serverUrl: SRV_A, userId: 'u1', accessToken: 'tok-1' });
+    assert.equal((Store.listUsers() || []).length, 1);
+    assert.equal((Store.listServers() || []).length, 1);
+    assert.equal(Store.getActive().userId, 'u1');
 });
 
 test('une URL inexploitable n\'entre jamais dans le stockage', () => {

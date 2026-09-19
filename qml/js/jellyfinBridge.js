@@ -843,6 +843,12 @@ function normalizeServerUrl(input, preferHttps) {
         return "";
     if (/\s/.test(authority))
         return "";
+    // Schéma et autorité ne sont pas sensibles à la casse : sans ce passage en
+    // minuscules, « HTTP://Host:8096 » et « http://host:8096 » deviennent deux
+    // clés de stockage, donc deux profils, deux serveurs mémorisés et deux
+    // entrées de coffre. Le chemin, lui, reste intact : un Jellyfin derrière un
+    // reverse-proxy peut être publié sur un sous-chemin sensible à la casse.
+    u = u.replace(/^https?:\/\/[^\/?#]*/i, function(head) { return head.toLowerCase(); });
     u = _stripQueryAndFragment(u);
     u = u.replace(/\/web\/index\.html.*$/i, "");
     u = u.replace(/\/web\/?$/i, "");

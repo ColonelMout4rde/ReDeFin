@@ -65,6 +65,24 @@ test('normalizeServerUrl : sans schéma, LAN => http, reste => https', () => {
     assert.equal(fresh.normalizeServerUrl('nas', false), 'http://nas');
 });
 
+test('normalizeServerUrl : schéma et autorité en minuscules, chemin intact', () => {
+    // Schéma et autorité sont insensibles à la casse : deux graphies d'un même
+    // serveur doivent donner la même clé de stockage côté UserStore.
+    assert.equal(B.normalizeServerUrl('HTTP://192.168.1.5:8096', false),
+                 'http://192.168.1.5:8096');
+    assert.equal(B.normalizeServerUrl('HtTpS://Jellyfin.Test:8920', false),
+                 'https://jellyfin.test:8920');
+    assert.equal(B.normalizeServerUrl('NAS.local:8096', false),
+                 'http://nas.local:8096');
+
+    // Le chemin d'un reverse-proxy peut être sensible à la casse : il ne bouge
+    // pas, pas plus que /web ou le slash final qui sont retirés comme avant.
+    assert.equal(B.normalizeServerUrl('HTTP://NAS.local:8096/Jellyfin/', false),
+                 'http://nas.local:8096/Jellyfin');
+    assert.equal(B.normalizeServerUrl('HTTP://NAS.local:8096/Web/index.html', false),
+                 'http://nas.local:8096');
+});
+
 test('normalizeServerUrl : entrées refusées', () => {
     const refus = [
         '',
