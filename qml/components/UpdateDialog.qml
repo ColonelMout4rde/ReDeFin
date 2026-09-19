@@ -21,7 +21,7 @@ FocusScope {
     // URI validée expérimentalement :
     // ouvre le Free Store.
     property string freeStoreUrl:
-        "app:fr.freebox.freestore?package=com.lab.redefin"
+        "app:fr.freebox.freestore?package=com.cm.redefin"
 
     // 0 = Plus tard
     // 1 = Ouvrir le Free Store

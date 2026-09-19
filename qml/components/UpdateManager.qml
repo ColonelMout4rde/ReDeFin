@@ -13,9 +13,9 @@ Item {
     visible: false
 
     property string manifestUrl:
-        "https://raw.githubusercontent.com/laborantine/ReDeFin/main/updates/manifest.json"
+        "https://raw.githubusercontent.com/ColonelMout4rde/ReDeFin/refs/heads/CM/factory/updates/manifest.json"
 
-    property string applicationId: "com.lab.redefin"
+    property string applicationId: "com.cm.redefin"
 
     // Version réellement exposée par le runtime Freebox / FreeStore.
     // Formats tolérés :
