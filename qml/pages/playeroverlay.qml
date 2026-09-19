@@ -1193,7 +1193,13 @@ FocusScope {
     }
     function _cancelHardSourceReset(reason){ H.cancelHardSourceReset(root, sourceResetTimer) }
     function _commitFreshServerTimedSource(reason){ H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item) }
-    function _finishFreshServerTimedSourceTimeout(reason){ H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item) }
+    function _finishFreshServerTimedSourceTimeout(reason){
+        H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item)
+        // Le reset dur a expiré sans progression : le comportement de sortie
+        // reste celui du succès, mais la gate de chargement ne doit plus
+        // pouvoir rester armée indéfiniment sur un pipeline qui ne démarre pas.
+        _releaseVideoLoading("fresh-source-reset-timeout")
+    }
     function _beginHardSourceReset(u,shouldResume){ H.beginHardSourceReset(root,mp,sourceResetTimer,audioGateDelay,startupPlayTimer,subsLoader.item,u,shouldResume) }
     function _beginFreshDirectPlayReset(u,shouldResume,targetUi){
         H.beginFreshDirectPlayReset(root,mp,sourceResetTimer,audioGateDelay,startupPlayTimer,subsLoader.item,u,shouldResume,targetUi)

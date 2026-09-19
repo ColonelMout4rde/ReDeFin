@@ -1793,7 +1793,11 @@ function completeSeekRestoreVerified(root, seekTimer, resumeTimer, targetUi) {
     if (root._wasPlayingBeforeSwitch && track) {
         root._trackSwitchResumeAfterVerified = true;
         resumeTimer.restart();
+        return;
     }
+    // Restauration vérifiée sans reprise de lecture : la gate armée par
+    // mediaUrlSwap/beginFreshDirectPlayReset n'a plus aucun chemin de sortie.
+    releaseVideoLoadingWhenPaused(root, "seek-restore-verified-paused");
 }
 function abandonBootSeekRestoreWithoutReload(root,seekTimer,targetUi,reason){
     root._pendingSeekMs=-1; resetSeekRestoreState(root,null); try{seekTimer.stop();}catch(e0){}
@@ -1915,6 +1919,21 @@ function cancelHardSourceReset(root, timer) {
     root._sourceResetPlayRetries = 0;
     root._pendingHardResetBaseMs = -1;
 }
+/*
+ * Filet de sécurité du loader vidéo.
+ *
+ * _scheduleVideoLoadingRelease() et les libérations « position-progress » /
+ * « state-playing » exigent toutes l'état Playing. Un rechargement qui se
+ * termine volontairement en pause (changement de piste, de sous-titre ou de
+ * qualité effectué pendant une pause) ne repasse donc jamais par ces chemins :
+ * la gate doit être libérée explicitement, sinon le spinner reste affiché
+ * au-dessus d'une image déjà décodée.
+ */
+function releaseVideoLoadingWhenPaused(root, reason) {
+    if (!root || typeof root._releaseVideoLoading !== "function") return false;
+    try { root._releaseVideoLoading(reason || "ready-paused"); } catch(e0) { return false; }
+    return true;
+}
 function completeFreshSourceResetState(root, timer, subtitleItem) {
     root._sourceResetActive = false;
     root._sourceResetPhase = 0;
@@ -1938,7 +1957,15 @@ function completeFreshServerTimedSource(root,mp,timer,subtitleItem){
     root.baseOffsetMs=expected; root._pendingServerTimedBaseMs=-1; root._pendingHardResetBaseMs=-1;
     root.serverTimedStream=true; root.timeShifted=expected>0; root._trackSwitchTimebaseVerified=true;
     completeFreshSourceResetState(root,timer,subtitleItem);
-    if(resume){if(mp.playbackState!==root._mpPlayingState){try{mp.play();}catch(e0){}}}else{try{mp.pause();}catch(e1){}}
+    if(resume){if(mp.playbackState!==root._mpPlayingState){try{mp.play();}catch(e0){}}}
+    else{
+        try{mp.pause();}catch(e1){}
+        // La lecture était en pause avant le rechargement : on restaure la pause,
+        // mais toutes les libérations de la gate de chargement exigent l'état
+        // Playing. Sans libération explicite ici, le loader resterait affiché
+        // indéfiniment par-dessus une vidéo pourtant prête.
+        releaseVideoLoadingWhenPaused(root,"fresh-source-ready-paused");
+    }
     root.updateClocksFromPlaybackThrottled(true);
 }
 function beginHardSourceReset(root, mp, timer, audioGateTimer, startupTimer,
@@ -2052,6 +2079,10 @@ function completeFreshDirectPlaySource(root, mp, timer, seekTimer, subtitleItem)
     root._scheduleVideoLoadingRelease("fresh-directplay-reset-complete");
     if (resume && mp.playbackState !== root._mpPlayingState) {
         try { mp.play(); } catch(e3) {}
+    } else if (!resume) {
+        // Même défaut que le reset server-timed : sans reprise de lecture,
+        // aucune libération automatique de la gate n'arrive jamais.
+        releaseVideoLoadingWhenPaused(root, "fresh-directplay-ready-paused");
     }
 }
 function tickSourceReset(root,mp,timer,seekTimer,subtitleItem){
