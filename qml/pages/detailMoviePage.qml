@@ -8,6 +8,7 @@ import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
 import "../js/DevLog.js" as DevLog
+import "../js/PosterSizing.js" as PosterSizing
 FocusScope {
     id: detailMoviePage
     width: 1280; height: 720; focus: true
@@ -1155,7 +1156,20 @@ FocusScope {
     readonly property int reqPosterH: Math.round(posterH * posterOS)
     readonly property int reqPosterHqW: Math.round(posterW * posterHqOS)
     readonly property int reqPosterHqH: Math.round(posterH * posterHqOS)
+    // F5 : le logo n'est jamais affiché à plus de 90% du cadre 230x330 sur la
+    // fiche (~207x297) ; la taille demandée au serveur suit ce format, pas le
+    // plein écran de l'overlay (voir movieLogoOverlayUrl / _currentArtUrl()).
+    readonly property var _logoReqSize: PosterSizing.requestedImageSize(posterW, posterH, 1.3, 80)
     property string movieLogoUrl: {
+        if (!hasItem || isMusicVideo) return ""
+        var tag = item.ImageTags && item.ImageTags.Logo ? String(item.ImageTags.Logo) : ""
+        return tag ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", tag, {
+            maxWidth: _logoReqSize.width, maxHeight: _logoReqSize.height, quality: 85, format: "png"
+        }) : ""
+    }
+    // Grande taille réservée à openPosterOverlay (plein écran) : ne jamais
+    // servir cette URL pour l'affichage courant de la fiche.
+    property string movieLogoOverlayUrl: {
         if (!hasItem || isMusicVideo) return ""
         var tag = item.ImageTags && item.ImageTags.Logo ? String(item.ImageTags.Logo) : ""
         return tag ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", tag, {
@@ -2679,6 +2693,10 @@ FocusScope {
                                 anchors.centerIn: parent
                                 width: parent.width * 0.90
                                 height: parent.height * 0.90
+                                // F5 : borne le décodage à la taille réellement demandée
+                                // au serveur, au lieu de décoder le PNG à sa taille native.
+                                sourceSize.width: _logoReqSize.width
+                                sourceSize.height: _logoReqSize.height
                                 asynchronous: true
                                 cache: true
                                 mipmap: false
@@ -2871,9 +2889,11 @@ FocusScope {
     }
     /* ===== Overlay helpers ===== */
     function _currentArtUrl(){
-        if (movieLogoUrl && !posterLogoFailed && posterLogo.status === Image.Ready) return movieLogoUrl
+        // F5 : les usages de cette fonction sont tous plein écran (overlay
+        // affiche, lecteur de résumé) : servir la grande variante du logo.
+        if (movieLogoUrl && !posterLogoFailed && posterLogo.status === Image.Ready) return movieLogoOverlayUrl
         if (movieCoverUrl && movieCoverUrl.length) return movieCoverUrl
-        return movieLogoUrl
+        return movieLogoOverlayUrl
     }
     function openOverlay(mode, payload){
         if (!hasItem) return

@@ -5,6 +5,7 @@ import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/DevLog.js" as DevLog
 import "../js/DetailGatePolicy.js" as DetailGatePolicy
+import "../js/PosterSizing.js" as PosterSizing
 FocusScope {
     id: detailSeriePage
     width: parent ? parent.width : 1280
@@ -1104,7 +1105,17 @@ FocusScope {
 
     property string fallbackPosterUrl: ""
     property bool   posterLogoFailed: false
+    // F5 : le logo n'est jamais affiché à plus de 90% du cadre 230x330 sur la
+    // fiche (~207x297) ; la taille demandée au serveur suit ce format, pas le
+    // plein écran de l'overlay (voir seriesLogoOverlayUrl / effectivePosterOverlayUrl).
+    readonly property var _logoReqSize: PosterSizing.requestedImageSize(posterW, posterH, 1.3, 80)
     property string seriesLogoUrl: (hasItem && item.ImageTags && item.ImageTags.Logo)
+        ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", item.ImageTags.Logo,
+                               { maxWidth:_logoReqSize.width, maxHeight:_logoReqSize.height, quality:85, format:"png" })
+        : ""
+    // Grande taille réservée à openPosterOverlay (plein écran) : ne jamais
+    // servir cette URL pour l'affichage courant de la fiche.
+    property string seriesLogoOverlayUrl: (hasItem && item.ImageTags && item.ImageTags.Logo)
         ? Jellyfin.itemImageUrl(serverUrl, item.Id, "Logo", item.ImageTags.Logo,
                                { maxWidth:900, maxHeight:900, quality:85, format:"png" })
         : ""
@@ -1143,6 +1154,11 @@ FocusScope {
     }
     readonly property string effectivePosterUrl: (seriesLogoUrl && !posterLogoFailed && posterLogo.status !== Image.Error)
         ? seriesLogoUrl : seriesCoverUrl
+    // F5 : grande variante réservée aux vues plein écran (overlay affiche,
+    // lecteur de résumé) ; effectivePosterUrl reste la petite taille utilisée
+    // sur la fiche.
+    readonly property string effectivePosterOverlayUrl: (seriesLogoUrl && !posterLogoFailed && posterLogo.status !== Image.Error)
+        ? seriesLogoOverlayUrl : seriesCoverUrl
     function _setImageSourceIfChanged(img, url) {
         if (!img) return;
         var next = String(url || "");
@@ -2538,6 +2554,10 @@ FocusScope {
                                     anchors.verticalCenterOffset: tunePosterLogoShiftY
                                     width: parent.width*0.90
                                     height: parent.height*0.90
+                                    // F5 : borne le décodage à la taille réellement demandée
+                                    // au serveur, au lieu de décoder le PNG à sa taille native.
+                                    sourceSize.width: _logoReqSize.width
+                                    sourceSize.height: _logoReqSize.height
                                     asynchronous: true
                                     cache: true
                                     mipmap: false
@@ -2948,7 +2968,7 @@ FocusScope {
         if (!hasItem) return;
         lastFocusBeforeOverlay=currentFocus;
         overlayMode="poster";
-        overlayData={ posterUrl: effectivePosterUrl, posterMaxW: posterMaxW, posterMaxH: posterMaxH };
+        overlayData={ posterUrl: effectivePosterOverlayUrl, posterMaxW: posterMaxW, posterMaxH: posterMaxH };
     }
     function _overviewReaderImageUrl(){
         return item ? Jellyfin.itemBackdropOrPrimaryUrl(serverUrl, item, {
@@ -2968,7 +2988,7 @@ FocusScope {
             readerStyle: "media",
             title: itemTitle || "Résumé",
             meta: meta.join("  •  "),
-            posterUrl: _overviewReaderImageUrl() || seriesCoverUrl || effectivePosterUrl,
+            posterUrl: _overviewReaderImageUrl() || seriesCoverUrl || effectivePosterOverlayUrl,
             overview: item.Overview || "",
             posterMaxW: posterMaxW,
             posterMaxH: posterMaxH
