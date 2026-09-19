@@ -1,262 +1,84 @@
-# ReDeFin
+# ReDeFin-CM
 
-<!-- Improved compatibility of back to top link: See: https://github.com/othneildrew/Best-README-Template/pull/73 -->
-<a id="readme-top"></a>
-<!--
-*** Thanks for checking out the Best-README-Template. If you have a suggestion
-*** that would make this better, please fork the repo and create a pull request
-*** or simply open an issue with the tag "enhancement".
-*** Don't forget to give the project a star!
-*** Thanks again! Now go create something AMAZING! :D
--->
-
-
-
-<!-- PROJECT SHIELDS -->
-<!--
-*** I'm using markdown "reference style" links for readability.
-*** Reference links are enclosed in brackets [ ] instead of parentheses ( ).
-*** See the bottom of this document for the declaration of the reference variables
-*** for contributors-url, forks-url, etc. This is an optional, concise syntax you may use.
-*** https://www.markdownguide.org/basic-syntax/#reference-style-links
--->
-[![Contributors][contributors-shield]][contributors-url]
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
-[![Unlicense License][license-shield]][license-url]
-
-<!-- PROJECT LOGO -->
-<br />
-<div align="center">
-  <a href="https://github.com/user-attachments/assets/c14346df-2e99-482b-9c6d-d064583890bd">
-    <img src="https://github.com/user-attachments/assets/c14346df-2e99-482b-9c6d-d064583890bd" alt="Logo" width="480" height="480">
-  </a>
-
-  <h3 align="center">Un client Jellyfin non officiel pour lire votre bibliothèque sur Freebox</h3>
-
-  <p align="center">
-  ReDeFin est un client non officiel Jellyfin pensé spécialement pour les Freebox Player (Révolution / Devialet).
- 
-  Son objectif : Profiter de votre bibliothèque comme sur une grande plateforme de streaming avec votre serveur, vos fichiers, votre Freebox.
-    <br />
-    <a href="https://github.com/laborantine/ReDeFin"><strong>Voir la documentation</strong></a>
-    <br />
-    <br />
-    <a href="https://github.com/laborantine/ReDeFin/issues/new?labels=bug&template=bug-report---.md">Rapporter un bug</a>
-    &middot;
-    <a href="https://github.com/laborantine/ReDeFin/issues/new?labels=enhancement&template=feature-request---.md">Suggérer une nouvelle fonctionnalité</a>
-  </p>
-</div>
-
-
-
-<!-- TABLE DES MATIERES -->
-<details>
-  <summary>Table des matières</summary>
-  <ol>
-    <li>
-      <a href="About-this-project">A propos de ce projet</a>
-      <ul>
-        <li><a href="built-with">Fabriqué avec</a></li>
-      </ul>
-    </li>
-    <li>
-      <a href="getting-started">Introduction</a>
-      <ul>
-        <li><a href="prerequisites">Prérequis</a></li>
-        <li><a href="installation">Installation</a></li>
-      </ul>
-    </li>
-    <li><a href="usage">Usage</a></li>
-    <li><a href="roadmap">Roadmap</a></li>
-    <li><a href="contributing">Contributeurs</a></li>
-    <li><a href="license">Licence</a></li>
-    <li><a href="contact">Contact</a></li>
-    <li><a href="acknowledgments">Remerciements</a></li>
-  </ol>
-</details>
-
-<!-- A propos de ce PROJET -->
-## A propos de ce projet
-
-ReDeFin est un client Jellyfin NON OFFICIEL codé en QML et JavaScript, compatible Freebox Revolution et Freebox Delta (Devialet).
-
-L'objectif souhaité est de se rapprocher visuellement et fonctionnellement de ce que le client officiel Android TV est capable de faire.
-
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-
-
-## Fabriqué avec
-
-* [![chatgpt.com][chatgpt.com]][chatgpt-url]
-  
-Ce projet a été intégralement fabriqué à partir de ChatGPT depuis 2024. Il a été fabriqué à partir des modèles de langages suivants :
-  
-Travaux préliminaires (2024 - mars 2025) :
-
-- GPT-3.5
-- GPT-4
-- GPT-4o
-
-Travaux principaux (avril 2025 - maintenant) :
-
-- GPT-4.5
-- GPT-5
-- GPT-5.1
-- GPT-5.2
-- GPT-5.4
-- GPT-5.5
-- GPT-5.6 Sol
-  
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-
-
-<!-- GETTING STARTED -->
-## Introduction
-
-![Places bêta](https://img.shields.io/badge/Places-102%20occup%C3%A9es%20sur%20160%20%E2%80%94%2058%20restantes-orange?style=for-the-badge)
-
-Le projet est actuellement en phase bêta fermé.
-
-Disponibilité des places pour candidater en tant que beta-testeur sur la Freebox Devialet :
-
-![Bêta Devialet](https://img.shields.io/badge/Devialet-71%2F80%20occup%C3%A9es-DC2626?style=for-the-badge)
-
-Disponibilité des places pour candidater en tant que beta-testeur sur la Freebox Revolution :
-
-
-![Bêta Révolution](https://img.shields.io/badge/R%C3%A9volution-31%2F80%20occup%C3%A9es-brightgreen?style=for-the-badge)
-
-
-Pour candidater en tant que bêta-testeur, il faut vous munir de votre n° d'abonné Freebox (commençant la plupart du temps par fbxXXX) que vous retrouvez sur votre espace client Freebox. Une fois que vous avez cette information, veuillez envoyer un mail en précisant êgalement la Freebox que vous avez et envoyez le tout à : application.redefin@proton.me. 
-
-### Prérequis
-
-Vous devez disposer au moins de l'un des produits suivants pour bénéficier de cette application :
-
-* Freebox Révolution
-
-<div align="left">
-  <a href="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264">
-    <img src="https://github.com/user-attachments/assets/691c2ed2-626e-4702-8277-9750ef365264" alt="Freebox Révolution" width="576" height="320">
-  </a>
-</div>
-
-* Freebox Delta-Devialet
-
-<div align="left">
-  <a href="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c">
-    <img src="https://github.com/user-attachments/assets/ee7d6788-fa02-4e52-aed8-ad6201c4454c" alt="Freebox Delta Devialet" width="576" height="320">
-  </a>
-</div>
-
-
-### Installation
-
-Une fois votre mail envoyé à application.redefin@proton.me pour candidater en qualité de bêta-testeur, vous aurez une réponse vous confirmant la prise en compte de votre mail et la déclaration de votre n° d'abonné (identifiant Freebox) dans la liste des bêta-testeurs.
-
-Vous pourrez alors vous rendre dans le Free Store sur votre Freebox Player afin de télécharger ReDeFin.
-
-> [!CAUTION]
-> **Utilisateurs Freebox Devialet**
+> [!IMPORTANT]
+> **Ceci n'est pas ReDeFin.** ReDeFin-CM est un fork personnel et non officiel de
+> [ReDeFin](https://github.com/laborantine/ReDeFin), le client Jellyfin pour
+> Freebox Player développé par **Laborantine**.
 >
-> Pour télécharger ReDeFin depuis le Free Store, votre Freebox Devialet doit être rattachée à un abonnement Free permettant l'accès au Free Store.
->
-> Si vous possédez une Freebox Devialet sans abonnement Free associé, merci de me contacter. Une méthode de test alternative pourrait vous permettre d'exécuter ReDeFin autrement.
+> - Vous cherchez l'application, la bêta ou le support : tout se passe sur le
+>   [dépôt officiel](https://github.com/laborantine/ReDeFin).
+> - Ce fork n'est **pas distribué publiquement**, n'a pas de programme de
+>   bêta-test et n'offre aucun support.
+> - Un problème constaté avec ReDeFin-CM ne doit **pas** être signalé à
+>   Laborantine : il peut venir des modifications de ce fork.
 
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
+## Pourquoi ce fork
 
-<!-- USAGE EXAMPLES -->
-## Usage
+ReDeFin ne s'installe que par le Free Store. Il n'existe aucun moyen d'installer
+un paquet sur un Freebox Player en dehors du Free Store : le mode développeur ne
+permet qu'un lancement éphémère depuis un PC. Pour utiliser au quotidien des
+correctifs qui ne sont pas (ou pas encore) dans la version officielle, il faut
+donc déposer un paquet distinct sur le Free Factory.
 
-Cette application vous permet de lire vos épisodes de séries et vos films de votre bibliothèque Jellyfin. Le support de la bibliothèque musicale et des chaines TV sont à l'étude.
+ReDeFin-CM est ce paquet. Il porte sa propre identité afin de cohabiter avec le
+ReDeFin officiel dans « Mes Applications », sans partager ni tuile ni réglages :
 
-_Pour plus d'exemples, Référez-vous à la [documentation officielle de Jellyfin](https://jellyfin.org/docs/)_
+| | ReDeFin (officiel) | ReDeFin-CM (ce fork) |
+|---|---|---|
+| Auteur | Laborantine | ColonelMout4rde |
+| Identifiant Free Store | `com.lab.redefin` | `com.cm.redefin` |
+| Disponibilité | bêta fermée, sur candidature auprès de Laborantine | bêta privée, réservée à la Freebox de l'auteur |
+| Annonce de mise à jour | `updates/manifest.json` du dépôt officiel | `updates/manifest.json` de cette branche |
 
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
+## Ce qui change par rapport à ReDeFin
 
+Le détail est dans [CHANGELOG.md](CHANGELOG.md). En résumé :
 
+- l'écran « Qui regarde ? » réagit au premier appui sur OK ;
+- changer de piste audio, de sous-titres ou de qualité pendant une pause ne
+  bloque plus la lecture sur un chargement infini ;
+- un réglage « Sortie audio » (Multicanal / Stéréo) pour les installations sans
+  système 5.1 ;
+- les sous-titres forcés français sont conservés quel que soit le chemin de
+  lecture.
 
-<!-- ROADMAP -->
-## Roadmap
+Les correctifs d'intérêt général sont proposés à Laborantine. Ce fork n'a pas
+vocation à diverger : il suit les versions officielles et ne garde en propre
+que ce qui n'a pas été repris.
 
-- [x] Support de la bibliothèque Séries, Films et Collections
-- [x] Lecteur vidéo compatible DirectPlay/Remux/DirectStream/Transcodage
-- [x] Support multi-profil
+## Branches
 
-Voir [open issues](https://github.com/laborantine/ReDeFin/issues) pour un aperçu complet des nouvelles fonctionnalités (et des problèmes connus).
+| Branche | Rôle |
+|---|---|
+| `main` | miroir des sources officielles (extraites des paquets `.fbxqml` publiés) et correctifs proposés à Laborantine ; conserve l'identité `com.lab.redefin` |
+| `dev` | fonctionnalités en cours de validation |
+| `CM/factory` | **production** : le paquet ReDeFin-CM déposé sur le Free Factory |
 
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
+Les fusions vont toujours de `main` ou `dev` vers `CM/factory`, jamais l'inverse.
 
+## Construire et tester
 
+Rien n'est compilé : un paquet `.fbxqml` est une archive des sources QML/JS.
 
-<!-- CONTRIBUTING -->
-## Contributeurs
+```bash
+./check.sh                                    # lint, tests Node, Qt Quick et Python
+./build.sh -o build/ReDeFin-CM_0.9.7.fbxqml   # paquet à déposer sur le Free Factory
+python3 tools/fbx-run.py -t <ip-du-player>    # lancement direct sur un Player en mode développeur
+```
 
-Les contributions font de la communauté open source un lieu exceptionnel pour apprendre, s'inspirer et créer. Toute contribution est **gratuitement appréciée**.
+[CONTRIBUTING.md](CONTRIBUTING.md) décrit les prérequis, les tests et le mode
+développeur du Player (Réglages > Système > Mode développeur).
 
-Si vous avez une suggestion pour améliorer ce projet, n'hésitez pas à forker le dépôt et à créer une pull request. Vous pouvez également ouvrir une issue avec l'étiquette « enhancement ».
+## Crédits et licence
 
-Pensez à mettre une étoile au projet ! Merci encore ;)
+ReDeFin est l'œuvre de **Laborantine**, que ce fork ne fait que prolonger :
+[github.com/laborantine/ReDeFin](https://github.com/laborantine/ReDeFin). Si
+l'application vous est utile, c'est ce projet qu'il faut soutenir.
 
-### Top contributors:
+Les modifications propres à ce fork ont été réalisées par ColonelMout4rde avec
+l'aide de Claude Code.
 
-<a href="https://github.com/laborantine/ReDeFin/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=laborantine/ReDeFin" alt="contrib.rocks image" />
-</a>
+Distribué sous licence GPL-3.0, comme le projet d'origine. Voir [LICENSE](LICENSE).
 
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-
-
-<!-- LICENSE -->
-## Licence
-
-Distribuée sous la licence GPL 3.0. Regardez le fichier `LICENSE.txt` pour plus d'informations.
-
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-
-
-<!-- CONTACT -->
-## Contact
-
-Laborantine - (https://github.com/laborantine/ReDeFin/issues) - application.redefin@proton.me
-
-Lien officiel du projet : [https://github.com/laborantine/ReDeFin](https://github.com/laborantine/ReDeFin)
-
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Remerciements
-
-Un grand merci à :
-
-- L'équipe de Free
-- L'équipe des beta-testeurs
-- OpenAI
-
-<p align="right">(<a href="#readme-top">Retour en haut de page</a>)</p>
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/B0B01NEJ0U)
-
-<!-- MARKDOWN LINKS & IMAGES -->
-<!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
-[contributors-shield]: https://img.shields.io/github/contributors/laborantine/ReDeFin.svg?style=for-the-badge
-[contributors-url]: https://github.com/laborantine/ReDeFin/network/dependencies
-[forks-shield]: https://img.shields.io/github/forks/laborantine/ReDeFin.svg?style=for-the-badge
-[forks-url]: https://github.com/laborantine/ReDeFin/network/members
-[stars-shield]: https://img.shields.io/github/stars/laborantine/ReDeFin.svg?style=for-the-badge
-[stars-url]: https://github.com/laborantine/ReDeFin/stargazers
-[issues-shield]: https://img.shields.io/github/issues/laborantine/ReDeFin.svg?style=for-the-badge
-[issues-url]: https://github.com/laborantine/ReDeFin/issues
-[license-shield]: https://img.shields.io/github/license/laborantine/ReDeFin.svg?style=for-the-badge
-[license-url]: https://github.com/laborantine/ReDeFin/blob/main/LICENSE
-[product-screenshot]: images/screenshot.png
-[chatgpt.com]: https://img.shields.io/badge/chatGPT-74aa9c?style=for-the-badge&logo=openai&logoColor=white
-[chatgpt-url]: https://chatgpt.com/fr-FR 
+ReDeFin et ReDeFin-CM sont des projets non officiels, sans lien avec Jellyfin
+ni avec Free.
