@@ -133,7 +133,10 @@ FocusScope {
             videoLoadingShowTimer.restart()
     }
     function _releaseVideoLoading(reason){
-        DevLog.log("T8", "loader RELEASE reason=" + reason)
+        // Appelée à chaque seconde de lecture (« position-progress ») : ne
+        // tracer que les libérations effectives, quand la gate était armée.
+        if (DevLog.ENABLED && videoLoadingGate)
+            DevLog.log("T8", "loader RELEASE reason=" + reason)
         videoLoadingGate = false
         _videoLoadingReason = ""
         if (!videoLoadingRequested) {

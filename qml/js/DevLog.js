@@ -11,7 +11,9 @@
 // à false.
 //
 // Les traces sortent sur la console du Player, relayée par fbx-run.py sous la
-// forme « [err] … qml: <fichier>: [RDF] <tag> <message> ».
+// forme « [err] … qml: DevLog: [RDF] <tag> <message> » : le Player nomme le
+// fichier qui appelle console.log, donc toujours DevLog. C'est le tag qui
+// identifie l'origine de la trace.
 //
 // Règles d'usage :
 //   - ne jamais journaliser de secret : passer toute URL par maskUrl() ;

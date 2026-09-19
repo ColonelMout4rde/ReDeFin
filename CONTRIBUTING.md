@@ -244,7 +244,8 @@ DevLog.log("T5", "url=" + DevLog.maskUrl(url))   // never log a raw URL
 `log()` does nothing for end users. `tools/fbx-run.py` serves that one file
 with the flag switched to `true` on the fly (nothing is written to disk), so
 traces appear **only during a developer-mode run**, as
-`[err] … qml: <file>: [RDF] <tag> <message>`. Pass `--no-dev-log` to run
+`[err] … qml: DevLog: [RDF] <tag> <message>` (the Player names the file that
+calls `console.log`, so always `DevLog`; the tag identifies the origin). Pass `--no-dev-log` to run
 exactly like the public package. `build.sh` refuses to package the file if
 the flag is not `false`, and a Node test enforces the same.
 
