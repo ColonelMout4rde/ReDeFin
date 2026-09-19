@@ -36,6 +36,11 @@ FocusScope {
     property int _hqPendingIndex: -1
     property int lastFocusedIndex: 0
     property var chapters: []
+    // M1 : la page fournit déjà item.Chapters (présent dans sa propre
+    // réponse /Items). null signifie « la page ne l'a pas fourni » (item pas
+    // encore arrivé, ou champ absent de la réponse) : c'est le seul cas où
+    // ce composant refait sa propre requête via fetchItemChapters().
+    property var itemChapters: null
     property int _requestSeq: 0
     readonly property bool hasContent: !!(chapters && chapters.length > 0)
 
@@ -74,11 +79,20 @@ FocusScope {
         _hqPendingIndex = idx
         hqPromotionTimer.restart()
     }
+    function _applyProvidedChapters(){
+        chapters = itemChapters || []
+        if (lastFocusedIndex >= chapters.length) lastFocusedIndex = Math.max(0, chapters.length - 1)
+        chapterList.currentIndex = chapters.length ? lastFocusedIndex : -1
+    }
     function _scheduleFetch(){
         _requestSeq++
-        chapters = []
         focusRetry.stop()
-        if (!fetchEnabled || !serverUrl || !accessToken || !itemId) { fetchTimer.stop(); return }
+        fetchTimer.stop()
+        // M1 : repli sur la requête réseau seulement si la page n'a pas
+        // fourni itemChapters (item.Chapters absent de sa propre réponse).
+        if (itemChapters !== null) { _applyProvidedChapters(); return }
+        chapters = []
+        if (!fetchEnabled || !serverUrl || !accessToken || !itemId) return
         fetchTimer.restart()
     }
     function _fetch(){
@@ -143,6 +157,7 @@ FocusScope {
     onAccessTokenChanged: _scheduleFetch()
     onItemIdChanged: _scheduleFetch()
     onFetchEnabledChanged: _scheduleFetch()
+    onItemChaptersChanged: _scheduleFetch()
     onActiveFocusChanged: {
         if (activeFocus && hasContent && !(chapterList.currentItem && chapterList.currentItem.activeFocus))
             _focusIndexSoon(lastFocusedIndex)

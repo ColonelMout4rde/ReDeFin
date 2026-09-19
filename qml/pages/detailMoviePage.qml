@@ -2775,6 +2775,13 @@ FocusScope {
                             item.serverUrl = Qt.binding(function(){ return detailMoviePage.serverUrl })
                             item.accessToken = Qt.binding(function(){ return detailMoviePage.accessToken })
                             item.itemId = Qt.binding(function(){ return detailMoviePage.itemId })
+                            // M1 : item.Chapters est déjà dans la réponse de la
+                            // fiche (fetchUserItem) ; évite un second GET complet
+                            // de l'item rien que pour les chapitres.
+                            item.itemChapters = Qt.binding(function(){
+                                return (detailMoviePage.item && detailMoviePage.item.Chapters !== undefined)
+                                    ? detailMoviePage.item.Chapters : null
+                            })
                             item.sectionLeftMargin = 28
                             item.requestFocusAbove.connect(function(){
                                 if (hasCast()) {
