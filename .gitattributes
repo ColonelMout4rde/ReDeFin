@@ -1,0 +1,11 @@
+# Branche CM/factory : lors d'une fusion de main ou dev, ces deux fichiers
+# du fork l'emportent toujours sur ceux d'upstream, qui les modifie très
+# souvent (README) ou à chaque version (annonce de mise à jour).
+# Nécessite une fois par clone : git config merge.ours.driver true
+# Sans ce réglage, la fusion s'arrête simplement sur un conflit.
+#
+# Le « / » initial est indispensable : sans lui, « README.md » désignerait
+# tout fichier de ce nom (tests/README.md, tools/README.md) et la fusion
+# jetterait en silence leurs évolutions venues de dev.
+/README.md             merge=ours
+/updates/manifest.json merge=ours
