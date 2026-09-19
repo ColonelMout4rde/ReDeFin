@@ -3,11 +3,14 @@ import "../components" as Components
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
+import "../js/DevLog.js" as DevLog
 FocusScope {
     id: detailSeriePage
     width: parent ? parent.width : 1280
     height: parent ? parent.height : 720
     focus: true
+    // Repère de temps pour l'instrumentation FICHE (DevLog, inerte en public).
+    property double _ficheT0: 0
     property string accessToken: ""
     property string userId: ""
     property string serverUrl: ""
@@ -1174,6 +1177,7 @@ FocusScope {
             posterFxTimer.stop(); posterFxReady=false;
             nextUpDurationText=""; nextUpEndText="";
         } else {
+            DevLog.log("FICHE6", "hardLoading=false serie dt=" + (Date.now() - _ficheT0));
             posterFxReady=false;
             posterFxTimer.restart();
             _startExtendedLoadingGates();
@@ -1182,6 +1186,14 @@ FocusScope {
             _scheduleViewportGate();
         }
     }
+    // FICHE : trace la levée de chaque garde, avec son nom pour raison.
+    onGateItemReadyChanged: if (gateItemReady) DevLog.log("FICHE5", "gate=item serie dt=" + (Date.now() - _ficheT0))
+    onGateMinDelayChanged: if (gateMinDelay) DevLog.log("FICHE5", "gate=minDelay serie dt=" + (Date.now() - _ficheT0))
+    onGatePosterReadyChanged: if (gatePosterReady) DevLog.log("FICHE5", "gate=poster serie dt=" + (Date.now() - _ficheT0))
+    onGateNextUpReadyChanged: if (gateNextUpReady) DevLog.log("FICHE5", "gate=nextUp serie dt=" + (Date.now() - _ficheT0))
+    onGateSeasonsBlockReadyChanged: if (gateSeasonsBlockReady) DevLog.log("FICHE5", "gate=seasons serie dt=" + (Date.now() - _ficheT0))
+    onGateLayoutReadyChanged: if (gateLayoutReady) DevLog.log("FICHE5", "gate=layout serie dt=" + (Date.now() - _ficheT0))
+    onVisualLoadingChanged: if (!visualLoading) DevLog.log("FICHE7", "curtain serie dt=" + (Date.now() - _ficheT0))
     readonly property int bgW: 1280
     readonly property int bgH: 720
     property int bgBlur: 8
@@ -1716,6 +1728,7 @@ FocusScope {
                 if (t!==_fetchToken) return;
                 _fetchHandle=null;
                 item = res;
+                DevLog.log("FICHE2", "item serie dt=" + (Date.now() - _ficheT0));
                 warmSnapshotVisible=false;
                 _warmDetailSnapshot=null;
                 _refreshActionButtonStates();
@@ -1771,6 +1784,8 @@ FocusScope {
         fetchDebounce.restart()
     }
     Component.onCompleted: {
+        _ficheT0 = Date.now();
+        DevLog.log("FICHE1", "onCompleted serie dt=0");
         _hydrateSensitiveContextFromShared();
         _consumePersonReturnRefreshMarker();
         // L'hydratation ci-dessus peut avoir déclenché plusieurs onXChanged et
@@ -1850,8 +1865,13 @@ FocusScope {
             property int loadToken: 0
             onStatusChanged: {
                 if (loadToken !== backdrop._token) return;
-                if (status===Image.Ready) { backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=0.90; gateBGReady=true; }
-                else if (status===Image.Error) { backdrop.loadingFull=""; opacity=0.0; gateBGReady=true; }
+                if (status===Image.Ready) {
+                    backdrop.lastFull=String(source || ""); backdrop.loadingFull=""; opacity=0.90; gateBGReady=true;
+                    DevLog.log("FICHE4", "bg-ready serie dt=" + (Date.now() - _ficheT0));
+                } else if (status===Image.Error) {
+                    backdrop.loadingFull=""; opacity=0.0; gateBGReady=true;
+                    DevLog.log("FICHE4", "bg-error serie dt=" + (Date.now() - _ficheT0));
+                }
             }
         }
         Rectangle {
@@ -1882,7 +1902,10 @@ FocusScope {
             _token += 1;
             bgImg.loadToken = _token;
             gateBGReady=false;
-            if (String(bgImg.source || "") !== String(ful || "")) bgImg.source=ful;
+            if (String(bgImg.source || "") !== String(ful || "")) {
+                bgImg.source=ful;
+                DevLog.log("FICHE3", "bg-src serie dt=" + (Date.now() - _ficheT0) + " " + DevLog.maskUrl(ful));
+            }
             _updateBGGate();
         }
     }

@@ -7,9 +7,12 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 FocusScope {
     id: detailMoviePage
     width: 1280; height: 720; focus: true
+    // Repère de temps pour l'instrumentation FICHE (DevLog, inerte en public).
+    property double _ficheT0: 0
     /* ===== Contexte ===== */
     property string accessToken: ""
     property string userId: ""
@@ -1237,6 +1240,7 @@ FocusScope {
             posterFxTimer.stop(); posterFxReady = false
             actionsArmTimer.stop(); actionsArmed = false
         } else {
+            DevLog.log("FICHE6", "hardLoading=false movie dt=" + (Date.now() - _ficheT0))
             posterFxReady = false; safeRestart(posterFxTimer)
             actionsArmed = false
             safeRestart(actionsArmTimer)
@@ -1249,6 +1253,7 @@ FocusScope {
     }
     onVisualLoadingChanged: {
         if (!visualLoading) {
+            DevLog.log("FICHE7", "curtain movie dt=" + (Date.now() - _ficheT0))
             _updateExtendedSectionGates()
             _queueFocusRepair("visualLoadingReleased", 24)
         }
@@ -1256,6 +1261,13 @@ FocusScope {
             _scheduleDetailReturnRelease()
         _scheduleClockHudSync()
     }
+    // FICHE : trace la levée de chaque garde, avec son nom pour raison.
+    onGateItemReadyChanged: if (gateItemReady) DevLog.log("FICHE5", "gate=item movie dt=" + (Date.now() - _ficheT0))
+    onGateMinDelayChanged: if (gateMinDelay) DevLog.log("FICHE5", "gate=minDelay movie dt=" + (Date.now() - _ficheT0))
+    onGatePosterReadyChanged: if (gatePosterReady) DevLog.log("FICHE5", "gate=poster movie dt=" + (Date.now() - _ficheT0))
+    onGateCastBlockReadyChanged: if (gateCastBlockReady) DevLog.log("FICHE5", "gate=cast movie dt=" + (Date.now() - _ficheT0))
+    onGateSimilarBlockReadyChanged: if (gateSimilarBlockReady) DevLog.log("FICHE5", "gate=similar movie dt=" + (Date.now() - _ficheT0))
+    onGateLayoutReadyChanged: if (gateLayoutReady) DevLog.log("FICHE5", "gate=layout movie dt=" + (Date.now() - _ficheT0))
     onBaseVisualLoadingChanged: {
         if (detailReturnRefreshGate)
             _scheduleDetailReturnRelease()
@@ -1362,6 +1374,7 @@ FocusScope {
                 if (t !== _fetchToken || disposed) return
                 _fetchHandle = null
                 item = res
+                DevLog.log("FICHE2", "item movie dt=" + (Date.now() - _ficheT0))
                 warmSnapshotVisible = false
                 _warmDetailSnapshot = null
                 castPeopleAll = (res && res.People) ? res.People : []
@@ -1489,6 +1502,8 @@ FocusScope {
     }
     /* ===== Lifecycle ===== */
     Component.onCompleted: {
+        _ficheT0 = Date.now()
+        DevLog.log("FICHE1", "onCompleted movie dt=0")
         initialAuthoritativeFetchPending = true
         _hydrateSensitiveContextFromShared()
         _consumeDetailReturnRefreshMarker("component-completed")
@@ -1615,8 +1630,13 @@ FocusScope {
                     property int loadToken: 0
                     onStatusChanged: {
                         if (loadToken !== backdrop._token) return
-                        if (status === Image.Ready) { backdrop.lastFull = String(source || ""); backdrop.loadingFull = ""; opacity = 0.90; gateBGReady = true }
-                        else if (status === Image.Error) { backdrop.loadingFull = ""; opacity = 0.0; gateBGReady = true }
+                        if (status === Image.Ready) {
+                            backdrop.lastFull = String(source || ""); backdrop.loadingFull = ""; opacity = 0.90; gateBGReady = true
+                            DevLog.log("FICHE4", "bg-ready movie dt=" + (Date.now() - _ficheT0))
+                        } else if (status === Image.Error) {
+                            backdrop.loadingFull = ""; opacity = 0.0; gateBGReady = true
+                            DevLog.log("FICHE4", "bg-error movie dt=" + (Date.now() - _ficheT0))
+                        }
                     }
                 }
                 Rectangle {
@@ -1645,7 +1665,10 @@ FocusScope {
                     if (ful === lastFull || ful === loadingFull) { _updateBGGate(); return }
                     loadingFull = ful; _token += 1; bgImg.loadToken = _token
                     gateBGReady = false
-                    if (String(bgImg.source || "") !== String(ful || "")) bgImg.source = ful
+                    if (String(bgImg.source || "") !== String(ful || "")) {
+                        bgImg.source = ful
+                        DevLog.log("FICHE3", "bg-src movie dt=" + (Date.now() - _ficheT0) + " " + DevLog.maskUrl(ful))
+                    }
                     _updateBGGate()
                 }
             }
