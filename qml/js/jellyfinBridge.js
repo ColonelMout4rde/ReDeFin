@@ -2575,6 +2575,7 @@ function fetchRandomEpisode(serverUrl, accessToken, userId, parentId, preferUnpl
             + "&UserId=" + enc(userId)
             + "&ParentId=" + enc(parentId)
             + "&Limit=1&SortBy=Random"
+            + "&EnableTotalRecordCount=false"
             + (unplayed ? "&Filters=IsUnplayed" : "");
         controller._setTransport(sendRequest("get", _u(serverUrl, path), headersWithToken(accessToken), null, function(res) {
             if (controller.cancelled || controller.done) return;
