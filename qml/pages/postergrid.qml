@@ -47,7 +47,13 @@ Item {
 
     property bool _homeRevealReady: false
     property bool _homeRevealPrepareActive: false
-    property int homeRevealSettleMs: 240
+    // Constat 2 de l'audit accueil : ce délai, ajouté à celui de HomePage
+    // (homeGateSettleMs) et au relance-450ms d'onHomeRevealReadyChanged
+    // (supprimé), formait l'essentiel de la traîne fixe après la dernière
+    // réponse réseau. 80 ms suffit à laisser le focus/scroll se stabiliser
+    // avant d'annoncer le reveal prêt.
+    readonly property int homeRevealSettleDefaultMs: 80
+    property int homeRevealSettleMs: homeRevealSettleDefaultMs
     readonly property bool homeRevealReady: _homeRevealReady
                                              && !_restoringFocus
                                              && !_focusRestorePending
@@ -1434,7 +1440,12 @@ Item {
         else if (MediaCatalog.isUnsupportedMediaItem(it)) openUnsupportedFolder(it)
         else playItem(it)
     }
-    readonly property int latestFullLimit: 50; readonly property int latestMaxInflight: 2; readonly property int latestStartDelayMs: 110; readonly property int latestProximityLibraryStep: 3
+    // Constat 2 de l'audit accueil : ce délai retardait chaque lancement de
+    // requête Latest sans raison fonctionnelle (juste un espacement de
+    // courtoisie hérité). 16 ms (~1 frame à 60 Hz) suffit à laisser
+    // latestPumpTimer repasser par la boucle d'événements entre deux
+    // requêtes sans ajouter de traîne perceptible.
+    readonly property int latestFullLimit: 50; readonly property int latestMaxInflight: 2; readonly property int latestStartDelayMs: 16; readonly property int latestProximityLibraryStep: 3
     readonly property int latestInitialRequestTimeoutMs: 6500
     property var _latestLibs: []; property int _latestPos: 0; property int _latestInFlight: 0; property int _latestQueueSeq: 0; property var _latestReloadHandles: ({})
     property var _latestInitialPending: ({})

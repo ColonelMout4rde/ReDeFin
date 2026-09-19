@@ -308,7 +308,14 @@ FocusScope {
     property bool fastHomeReturn: false
 
     property int  minLoadingMs: 900
-    property int  settleMs: 450
+    // Constat 2 de l'audit accueil : cette « stabilisation » attendait
+    // 450 ms sans changement après la dernière donnée avant même de
+    // regarder si le rideau pouvait se lever, ce qui ajoutait une traîne
+    // fixe après la dernière réponse réseau. 120 ms reste largement
+    // suffisant pour absorber une rafale de signaux Qt.callLater/bindings
+    // consécutifs à une même réponse, sans se faire sentir à l'écran.
+    readonly property int homeGateSettleMs: 120
+    property int  settleMs: homeGateSettleMs
     property int  afterFetchedOnceMinMs: 900
     property int  maxLoadingMs: 12000
     // Si le timeout global est atteint, on donne d'abord à PosterGrid une courte
@@ -1593,7 +1600,13 @@ FocusScope {
             homePage.pokeLoadingGate()
         }
         onHomeRevealReadyChanged: {
-            homePage.pokeLoadingGate()
+            // Constat 2 de l'audit accueil : homeRevealReady est le dernier
+            // événement du chemin de chargement. pokeLoadingGate() relançait
+            // ici un plein settleMs (traîne fixe) alors que tryFinishGate()
+            // referme la porte immédiatement si toutes les autres conditions
+            // sont déjà réunies, et se rabat sinon sur le même redémarrage
+            // du minuteur de stabilisation.
+            homePage.tryFinishGate("home-reveal-ready")
             if (posterGridLoader.item
                     && posterGridLoader.item.homeRevealReady === true
                     && !homePage._loading) {
