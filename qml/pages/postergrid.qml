@@ -106,7 +106,13 @@ Item {
         // D-Pad / souris : seul ce chemin anime horizontalement le rail.
         try { if (folderList.ensureIndexVisible) folderList.ensureIndexVisible(want, true) } catch(e0) {}
         updateBackdrop()
-        if (focusSection === 0 && !_restoringFocus && !_focusRestorePending && !_focusRestoreSettle) saveFocusSnapshot(reason || "folderIndex")
+        // Constat 9 de l'audit accueil : « currentFolderIndex = want » ci-dessus
+        // déclenche déjà onCurrentFolderIndexChanged, qui appelle
+        // saveFocusSnapshot("folderIndex") de façon synchrone avec le même
+        // contexte (focusSection, drapeaux de restauration inchangés entre les
+        // deux). Cet appel explicite était donc redondant à chaque appui dans
+        // « Mes médias » ; supprimé, le paramètre reason n'étant de toute
+        // façon pas utilisé par saveFocusSnapshot().
         Qt.callLater(function(){ _folderUserNavActive = false })
     }
     function _syncFolderListFromSaved() {

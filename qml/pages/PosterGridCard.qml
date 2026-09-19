@@ -153,7 +153,23 @@ FocusScope {
                 function onCardTitleHChanged() { cardRoot._syncHomeLoader() }
                 function onCardSidePadChanged() { cardRoot._syncHomeLoader() }
                 function onCardTopPadChanged() { cardRoot._syncHomeLoader() }
-                function onCardSelectedChanged() { cardRoot._syncHomeLoader() }
+                function onCardSelectedChanged() {
+                    // Constat 9 de l'audit accueil : sur une rangée Latest,
+                    // un appui recalcule selectedIndex sur TOUTES les
+                    // rangées, donc ce handler se déclenche très souvent.
+                    // _syncHomeLoader() réécrit 15 propriétés et relance la
+                    // transaction de résolution d'image (_homeSyncing/
+                    // homeSyncCommitted) pour un seul booléen. Recopie
+                    // directe, sûre ici : le onSelectedChanged de cardRoot
+                    // (zoom, marquee) réagit déjà seul à l'écriture de la
+                    // propriété quel que soit son origine, et requestImageSync()
+                    // n'écoute pas onSelectedChanged (voir plus bas) — rien ne
+                    // dépend de homeSyncCommitted() pour ce seul changement.
+                    // Toute autre propriété cardXxx changée en même temps
+                    // (recyclage de délégué) a de toute façon son propre
+                    // handler qui relance la synchronisation complète.
+                    if (cardRoot.homeLoader) cardRoot.selected = cardRoot.homeLoader.cardSelected === true
+                }
                 function onCardShowProgressChanged() { cardRoot._syncHomeLoader() }
                 function onCardPreferBackdropChanged() { cardRoot._syncHomeLoader() }
                 function onCardMusicFallbackChanged() { cardRoot._syncHomeLoader() }
