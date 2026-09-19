@@ -967,18 +967,23 @@ FocusScope {
         minDelayReady: gateMinDelay
     })
     property bool uiReady: false
+    // gateNextUpReady/gateSeasonsBlockReady/gateLayoutReady ne conditionnent
+    // plus le rideau (voir visualLoading ci-dessous, lot 2 : MESURES.md
+    // « fiche série » — gate=nextUp à 798 ms et gate=seasons à 912 ms
+    // retenaient le rideau alors que hardLoading tombe à 350 ms). Elles
+    // restent calculées uniquement pour l'instrumentation FICHE5
+    // (mesurer quand ces blocs finissent réellement de charger).
     property bool gateNextUpReady: false
     property bool gateSeasonsBlockReady: false
     property bool gateLayoutReady: false
     property bool extendedLoadingTimedOut: false
+    readonly property bool extendedLoading: !hardLoading && (!gateNextUpReady || !gateSeasonsBlockReady || !gateLayoutReady)
 
-    // Gate Saisons strict :
-    // - attendre le callback Jellyfin fetchSeasons()
-    // - si la série possède des saisons, attendre que SeasonsBlock ait reçu le
-    //   modèle COMPLET et que son ListView expose bien le même count.
-    //
-    // Le timeout des sections secondaires ne peut donc plus révéler une fiche
-    // dont les saisons vont apparaître plusieurs secondes après.
+    // seasonsBlockFullyReady n'est plus utilisée pour retenir le rideau (elle
+    // ne sert plus qu'à mesurer gateSeasonsBlockReady, cf. FICHE5) : attend
+    // le callback Jellyfin fetchSeasons(), puis, si la série a des saisons,
+    // que SeasonsBlock ait reçu le modèle complet et que son ListView
+    // expose bien le même count.
     readonly property bool seasonsBlockFullyReady: {
         if (!hasItem) return true
         if (!seasonsFetched) return false
@@ -997,15 +1002,18 @@ FocusScope {
             && published >= expected
             && (seasonsLoader.height | 0) > 0
     }
-    readonly property bool seasonsStrictLoading: hasItem && !seasonsBlockFullyReady
-
-    readonly property bool extendedLoading: !hardLoading && (!gateNextUpReady || !gateSeasonsBlockReady || !gateLayoutReady)
     property bool _personReturnGate: false
-    readonly property bool visualLoading: hardLoading
-                                          || extendedLoading
-                                          || seasonsStrictLoading
-                                          || _personReturnGate || _playerNextUpRestorePending
-                                          || _castViewportRestorePending
+    // Décision produit (lot 2, BRIEF-COMMUN.md) : le rideau se lève dès que
+    // l'en-tête est peuplé (hardLoading) et qu'aucun vrai défaut fonctionnel
+    // ne le retient. « À suivre » et Saisons arrivent ensuite, sous rideau
+    // levé ; SeasonsBlock réserve sa hauteur nominale via
+    // DetailGatePolicy.seasonsReservedHeight() pour éviter un saut de mise
+    // en page (voir seasonsLoader.height plus bas).
+    readonly property bool visualLoading: DetailGatePolicy.detailCurtainActive({
+        hardLoading: hardLoading,
+        functionalHazard: _personReturnGate || _playerNextUpRestorePending
+                          || _castViewportRestorePending
+    })
     readonly property bool shellLoading: visualLoading
     readonly property string shellLoadingError: ""
     function applyDetailSnapshot(snapshot){
@@ -1798,10 +1806,10 @@ FocusScope {
         _resetAverageEpisodeDuration();
         // F3 : seul itemId (avec serverUrl/accessToken/userId) est nécessaire
         // à /Seasons, pas la réponse de fetchItem. Lancer les deux requêtes
-        // en parallèle économise un aller-retour complet sur le chemin du
-        // rideau (gate Saisons, seasonsStrictLoading). Le garde seq de
-        // fetchSeasons() protège déjà une réponse tardive d'une génération
-        // précédente.
+        // en parallèle raccourcit d'autant la réservation de hauteur du bloc
+        // Saisons (DetailGatePolicy.seasonsReservedHeight(), lot 2) avant que
+        // le vrai contenu ne soit mesuré. Le garde seq de fetchSeasons()
+        // protège déjà une réponse tardive d'une génération précédente.
         if (!seasonsFetched && !seasonsFetchInFlight)
             fetchSeasons()
         _useWarmDetailSnapshot();
@@ -2693,7 +2701,17 @@ FocusScope {
                         active: (seasons && seasons.length>0) && heavyStageSeasons
                         source: active ? Qt.resolvedUrl("SeasonsBlock.qml") : ""
                         visible: status===Loader.Ready
-                        height: (status===Loader.Ready && seasonsLoader.item) ? Math.max((seasonsLoader.item.implicitHeight||0), 140) : 0
+                        // Une série a toujours au moins une saison : réserver la
+                        // hauteur nominale (DetailGatePolicy.seasonsReservedHeight)
+                        // tant que le bloc n'est pas chargé/mesuré évite un saut de
+                        // mise en page maintenant que le rideau ne l'attend plus.
+                        height: (status===Loader.Ready && seasonsLoader.item)
+                                ? Math.max((seasonsLoader.item.implicitHeight||0), 140)
+                                : DetailGatePolicy.seasonsReservedHeight({
+                                      hasItem: hasItem,
+                                      seasonsFetched: seasonsFetched,
+                                      seasonsCount: (seasons ? seasons.length : 0)
+                                  })
                         onStatusChanged: { _updateExtendedSectionGates(); }
                         onHeightChanged: _updateExtendedSectionGates()
                         onLoaded: {

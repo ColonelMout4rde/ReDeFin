@@ -125,3 +125,74 @@ test('pageCanReveal() ne prend aucun paramètre image : un état sans clé poste
         gateBGReady: false,
     }), true);
 });
+
+test('detailCurtainActive() (lot 2, MESURES.md « fiche série ») : ne dépend plus des blocs secondaires — hardLoading=false suffit à lever le rideau même si nextUp/seasons ne le sont pas', () => {
+    const Policy = load();
+    // Reproduit exactement l'état mesuré sur boîtier à dt=350 (hardLoading
+    // tombe) alors que gate=nextUp (798) et gate=seasons (912) ne sont pas
+    // encore atteintes. detailCurtainActive() n'a même pas ces clés dans sa
+    // signature : les repasser ne changerait rien.
+    assert.equal(Policy.detailCurtainActive({
+        hardLoading: false,
+        gateNextUpReady: false,
+        gateSeasonsBlockReady: false,
+    }), false);
+});
+
+test('detailCurtainActive() reste actif tant que hardLoading est vrai', () => {
+    const Policy = load();
+    assert.equal(Policy.detailCurtainActive({ hardLoading: true }), true);
+});
+
+test('detailCurtainActive() reste actif sur un vrai défaut fonctionnel même une fois hardLoading retombé', () => {
+    const Policy = load();
+    assert.equal(Policy.detailCurtainActive({
+        hardLoading: false,
+        functionalHazard: true,
+    }), true);
+});
+
+test('detailCurtainActive() se lève quand hardLoading est retombé et qu’aucun défaut fonctionnel ne subsiste', () => {
+    const Policy = load();
+    assert.equal(Policy.detailCurtainActive({
+        hardLoading: false,
+        functionalHazard: false,
+    }), false);
+    assert.equal(Policy.detailCurtainActive({}), false);
+});
+
+test('seasonsReservedHeight() (lot 2) : réserve la hauteur nominale tant que /Seasons n’a pas répondu', () => {
+    const Policy = load();
+    assert.equal(Policy.seasonsReservedHeight({
+        hasItem: true,
+        seasonsFetched: false,
+        seasonsCount: 0,
+    }) > 0, true);
+});
+
+test('seasonsReservedHeight() : rien à réserver avant que l’item (la série) ne soit connu', () => {
+    const Policy = load();
+    assert.equal(Policy.seasonsReservedHeight({
+        hasItem: false,
+        seasonsFetched: false,
+        seasonsCount: 0,
+    }), 0);
+});
+
+test('seasonsReservedHeight() : /Seasons a répondu sans saison, la réservation tombe à 0 (cas anormal mais géré)', () => {
+    const Policy = load();
+    assert.equal(Policy.seasonsReservedHeight({
+        hasItem: true,
+        seasonsFetched: true,
+        seasonsCount: 0,
+    }), 0);
+});
+
+test('seasonsReservedHeight() : /Seasons a répondu avec des saisons, la réservation reste (le vrai bloc n’est pas encore mesuré)', () => {
+    const Policy = load();
+    assert.equal(Policy.seasonsReservedHeight({
+        hasItem: true,
+        seasonsFetched: true,
+        seasonsCount: 3,
+    }) > 0, true);
+});
