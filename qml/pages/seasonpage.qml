@@ -4,11 +4,14 @@ import "../components" as Components
 import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/SeasonUtils.js" as SeasonUtils
 import "../js/MediaCatalog.js" as MediaCatalog
+import "../js/DevLog.js" as DevLog
 FocusScope {
     id: seasonpage
     width: parent ? parent.width : 1280
     height: parent ? parent.height : 720
     focus: true
+    // Repère de temps pour l'instrumentation SAISON (DevLog, inerte en public).
+    property double _saisonT0: 0
     property string accessToken
     property string userId
     property string serverUrl
@@ -325,6 +328,7 @@ FocusScope {
         repeat: false
         onTriggered: {
             layoutSettle = false;
+            DevLog.log("SAISON5", "step=layoutSettle dt=" + (Date.now() - _saisonT0));
             requestPinEpisodes("settleDone");
             requestReflow("settleDone");
             maybeHydrateEpisodesRow();
@@ -404,6 +408,7 @@ FocusScope {
         repeat: false
         onTriggered: {
             initialWarmup = false;
+            DevLog.log("SAISON5", "step=posterWarmup dt=" + (Date.now() - _saisonT0));
             withEpisodesRow(function(it){
                 if (it.updatePosterGate) it.updatePosterGate("warmupDone");
             });
@@ -418,6 +423,7 @@ FocusScope {
             if (!_guardRun()) return;
             if (!isLoading && !overlayOpen && postFirstFrame && !layoutSettle) {
                 _logoArmed = true;
+                DevLog.log("SAISON5", "step=logoArmed dt=" + (Date.now() - _saisonT0));
             } else if (!disposed && !isLoading) {
                 logoArmTimer.restart();
             }
@@ -918,6 +924,7 @@ FocusScope {
     readonly property bool loadingGateActive: !!(isLoading || visualRevealPending)
     readonly property bool shellLoading: loadingGateActive
     readonly property string shellLoadingError: loadingError || ""
+    onLoadingGateActiveChanged: if (!loadingGateActive) DevLog.log("SAISON6", "curtain dt=" + (Date.now() - _saisonT0))
 
     property bool _episodesFetchedOnce: false
     property bool _seasonFetchedOnce: false
@@ -975,11 +982,13 @@ FocusScope {
     }
     function _armVisualReveal(reason, returnMode){
         if (disposed) return;
+        DevLog.log("SAISON5", "step=armVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         _visualRevealReturnMode = returnMode === true; _visualRevealStartedMs = Date.now(); visualRevealPending = true;
         visualRevealSettleTimer.stop(); visualRevealPollTimer.restart(); visualRevealHardTimer.restart();
     }
     function _releaseVisualReveal(reason){
         if (!visualRevealPending) return;
+        DevLog.log("SAISON5", "step=releaseVisualReveal reason=" + (reason || "") + " dt=" + (Date.now() - _saisonT0));
         visualRevealPollTimer.stop(); visualRevealSettleTimer.stop(); visualRevealHardTimer.stop();
         visualRevealPending = false; _visualRevealHasShown = true; _visualRevealReturnMode = false;
         _visualRevealSuppressReturnUntilMs = Date.now() + 900; _externalFocusWasLost = false;
@@ -1192,6 +1201,7 @@ FocusScope {
             }
             _detailsPending = false;
             detailsReqSeq++;
+            DevLog.log("SAISON5", "step=detailsFetch dt=" + (Date.now() - _saisonT0));
             SeasonUtils.fetchSelectedDetails(seasonpage, Jellyfin);
         }
     }
@@ -1213,6 +1223,7 @@ FocusScope {
             if (_bgWantedUrl === _bgActiveUrl) return;
             if (!_bgWantedUrl || _bgWantedUrl.length === 0) return;
             _bgActiveUrl = _bgWantedUrl;
+            DevLog.log("SAISON5", "step=bgActive dt=" + (Date.now() - _saisonT0));
         }
     }
     function requestBgUpdate(){
@@ -1231,6 +1242,8 @@ FocusScope {
         SeasonUtils.recomputeTagsFromDetails(seasonpage, force);
     }
     onSelectedDetailsChanged: {
+        if (selectedDetails && selectedDetails.Id)
+            DevLog.log("SAISON5", "step=detailsReady dt=" + (Date.now() - _saisonT0));
         if (selectedDetails && selectedDetails.Id) _rememberEpisodeDetails(selectedDetails);
         recomputeTagsFromDetails(true);
         requestPinEpisodes("selectedDetailsChanged");
@@ -2600,6 +2613,8 @@ FocusScope {
     signal requestPlay(string itemId, string accessToken, string userId, string serverUrl, string itemTitle)
     signal requestNavigation(string page)
     Component.onCompleted: {
+        _saisonT0 = Date.now();
+        DevLog.log("SAISON1", "onCompleted dt=0");
         _hydrateSensitiveContextFromShared();
         _hydrateGuestPersonReturnState();
         ready = true;
@@ -2693,6 +2708,7 @@ FocusScope {
     onEpisodesChanged: {
         if (episodes === null) return;
         _episodesFetchedOnce = true;
+        DevLog.log("SAISON3", "episodes dt=" + (Date.now() - _saisonT0) + " count=" + episodes.length);
         updatePlaylistFromOwnedEpisodes();
         requestBgUpdate();
         if (!isLoading && !_episodesRowAlive) _episodesRowAlive = true;
@@ -2702,6 +2718,7 @@ FocusScope {
             if (wanted >= 0) currentIndex = wanted;
         }
         prepareEpisodesSlice();
+        DevLog.log("SAISON4", "episodes-model dt=" + (Date.now() - _saisonT0));
         maybeEndLoading();
         withEpisodesRow(function(it){ if (it.updatePosterGate) it.updatePosterGate("episodesChanged"); });
         _syncEpisodesRowPreferredId();
@@ -2711,6 +2728,7 @@ FocusScope {
     onSeasonItemChanged: {
         if (seasonItem === null) return;
         _seasonFetchedOnce = true;
+        DevLog.log("SAISON2", "season dt=" + (Date.now() - _saisonT0));
         updatePlaylistFromOwnedEpisodes();
         requestBgUpdate();
         maybeEndLoading();
