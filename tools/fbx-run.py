@@ -469,11 +469,14 @@ class StreamRelay(threading.Thread):
         self.out_stream = out_stream
         self.sock = socket.create_connection((host, port), timeout=connect_timeout)
         self.sock.settimeout(0.5)
-        self._stop = threading.Event()
+        # Surtout pas « _stop » : jusqu'à Python 3.12, threading.Thread possède
+        # une méthode privée _stop() que join() appelle. La masquer par un
+        # Event fait échouer join() (« 'Event' object is not callable »).
+        self._stop_event = threading.Event()
 
     def run(self):
         buf = b""
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 chunk = self.sock.recv(4096)
             except socket.timeout:
@@ -494,10 +497,10 @@ class StreamRelay(threading.Thread):
         try:
             print("[{}] {}".format(self.prefix, text), file=self.out_stream, flush=True)
         except (BrokenPipeError, ValueError):
-            self._stop.set()
+            self._stop_event.set()
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
         try:
             self.sock.close()
         except OSError:
