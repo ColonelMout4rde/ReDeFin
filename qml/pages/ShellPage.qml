@@ -19,6 +19,7 @@ import "../js/UserStore.js" as Users
 import "../components" as Components
 import "../js/clientId.js" as ClientId
 import "../js/SafeLog.js" as SafeLog
+import "../js/DevLog.js" as DevLog
 
 FocusScope {
     id: shell
@@ -32,6 +33,20 @@ FocusScope {
     property var    fbx
     property bool _pageLoadCurtainHold: false
     property int _pageLoadCurtainSeq: 0
+
+    // Instrumentation NAV1-NAV6 (mesure uniquement, aucun impact hors mode
+    // développeur : DevLog.log() est un no-op tant que DevLog.ENABLED est
+    // false). _navT0 est le repère de la navigation en cours ; chaque trace
+    // suivante rapporte son dt depuis NAV1. Ne jamais journalier autre chose
+    // que le nom de base de la page (jamais la query string ni un identifiant
+    // d'item).
+    property double _navT0: 0
+    onCurrentPageChanged: {
+        if (!currentPage) return
+        shell._navT0 = Date.now()
+        if (DevLog.ENABLED)
+            DevLog.log("NAV1", "request dt=0 page=" + shell._baseOf(currentPage).toLowerCase())
+    }
 
     /* ===================== UPDATE CHECK ===================== */
     // Une seule requête distante par démarrage.
@@ -193,11 +208,19 @@ FocusScope {
     readonly property int pageCurtainReadyMinHoldMs: 180
     readonly property int pageCurtainStableTicksRequired: 2
 
+    // Instrumentation NAV4 (mesure seule, aucun effet sur le délai de levée
+    // actuel) : détecte quand la page, ayant déclaré shellLoading=true, le
+    // repasse à false. _pageCurtainNav4LoggedSeq évite de journaliser deux
+    // fois la même transition pour une même séquence de rideau.
+    property bool _pageCurtainSawLoadingTrue: false
+    property int _pageCurtainNav4LoggedSeq: -1
+
     function _beginPageCurtainTransition() {
         _pageLoadCurtainSeq = (_pageLoadCurtainSeq + 1) | 0
         _pageLoadCurtainHold = true
         _pageCurtainReadySinceMs = 0
         _pageCurtainStableTicks = 0
+        _pageCurtainSawLoadingTrue = false
         try { pageCurtainReleaseTimer.stop() } catch(e0) {}
     }
 
@@ -235,6 +258,18 @@ FocusScope {
                 return
             }
 
+            // NAV4 (instrumentation seule) : la page a déclaré shellLoading vrai
+            // puis faux. Ne change rien au délai de levée ci-dessous.
+            if (shell._pageReportedLoading) {
+                shell._pageCurtainSawLoadingTrue = true
+            } else if (shell._pageCurtainSawLoadingTrue &&
+                       shell._pageCurtainNav4LoggedSeq !== curtainSeq) {
+                shell._pageCurtainNav4LoggedSeq = curtainSeq
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV4", "loaded dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
+            }
+
             var elapsed = Date.now() - Number(shell._pageCurtainReadySinceMs || 0)
             if (elapsed < shell.pageCurtainReadyMinHoldMs)
                 return
@@ -252,6 +287,10 @@ FocusScope {
                         !shell._pageReportedLoading) {
                     shell._pageLoadCurtainHold = false
                     shell._homeLaunchPending = false
+                    if (DevLog.ENABLED)
+                        DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                                   " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
+                                   " reason=stable-hold")
                 }
             }
         }
@@ -287,14 +326,22 @@ FocusScope {
             try {
                 if (p.restoreFocusAfterShellCurtain
                         && typeof p.restoreFocusAfterShellCurtain === "function") {
-                    if (p.restoreFocusAfterShellCurtain() !== false)
+                    if (p.restoreFocusAfterShellCurtain() !== false) {
+                        if (DevLog.ENABLED)
+                            DevLog.log("NAV6", "focus dt=" + (Date.now() - shell._navT0) +
+                                       " page=" + shell._baseOf(shell.currentPage).toLowerCase())
                         return
+                    }
                 }
             } catch(e0) {}
 
             try {
-                if (p.forceActiveFocus)
+                if (p.forceActiveFocus) {
                     p.forceActiveFocus(Qt.OtherFocusReason)
+                    if (DevLog.ENABLED)
+                        DevLog.log("NAV6", "focus dt=" + (Date.now() - shell._navT0) +
+                                   " page=" + shell._baseOf(shell.currentPage).toLowerCase())
+                }
             } catch(e1) {}
         })
     }
@@ -2105,6 +2152,9 @@ FocusScope {
         onStatusChanged: {
             if (status === Loader.Loading) {
                 shell._beginPageCurtainTransition()
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV2", "loading dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
             } else if (status === Loader.Error || status === Loader.Null) {
                 shell._pageLoadCurtainSeq = (shell._pageLoadCurtainSeq + 1) | 0
                 shell._pageLoadCurtainHold = false
@@ -2112,7 +2162,14 @@ FocusScope {
                 shell._pageCurtainReadySinceMs = 0
                 shell._pageCurtainStableTicks = 0
                 try { pageCurtainReleaseTimer.stop() } catch(e0) {}
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV5", "revealed dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase() +
+                               " reason=loader-error")
             } else if (status === Loader.Ready) {
+                if (DevLog.ENABLED)
+                    DevLog.log("NAV3", "ready dt=" + (Date.now() - shell._navT0) +
+                               " page=" + shell._baseOf(shell.currentPage).toLowerCase())
                 shell._schedulePageCurtainRelease(shell._pageLoadCurtainSeq)
             }
         }
