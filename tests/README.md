@@ -244,6 +244,41 @@ Pour lancer uniquement les tests QML :
 ~/.cache/redefin-qttools/venv/bin/python3 tests/qml/run_qml_tests.py
 ```
 
+## Tests de non-régression du code upstream
+
+Au-delà des tests de nos propres correctifs, la suite verrouille le
+comportement des fonctions sensibles du code upstream, pour qu'un import de
+nouvelle version ou un de nos changements qui modifie ce comportement soit vu
+par la CI.
+
+| Domaine | Fichiers | Harnais |
+|---|---|---|
+| Pont HTTP, codes d'erreur | `safelog`, `jellyfinbridge{url,http,cache}` | `bridgeharness.js` (XHR pilotable, horloge figée, file `Qt.callLater`) |
+| Identité, sessions, coffre des jetons | `clientid`, `userstorevault`, `userstorevaultprofiles` | `userstoreharness.js` (faux Settings, rechargement = redémarrage) |
+| Catalogue, saisons, générique | `mediacatalog`, `seasonutils`, `skipintro` | — |
+| Décision de lecture, URL, profils | `negotiationmatrix`, `playbackurl`, `devicepolicy` | `negotiationmatrixfixtures.js` + `negotiationharness.js` |
+| Lecteur | `playerposition`, `playersourcereset`, `playerseek`, `playerkeys`, `playersubtitles` | `playerharness.js` (faux root, MediaPlayer, Timer) |
+| QML | `tst_updatemanager`, `tst_appsettings`, `tst_settingssanitize`, `tst_components` | vrais fichiers QML |
+
+Règles de ces tests :
+
+- **Contrats observables, pas détails internes.** On vérifie ce que voient
+  l'utilisateur, le serveur ou l'appelant. Une URL se décode en table de
+  paramètres, on ne compare jamais l'ordre ni le texte d'une trace.
+- **Un test `todo` = un défaut connu du code upstream.** Il décrit le
+  comportement attendu, ne fait pas échouer la suite, et son message cite le
+  fichier et la ligne. Quand le défaut est corrigé (ici ou par upstream), Node
+  signale que le todo passe : retirer alors l'option `todo`. Ne jamais figer un
+  comportement manifestement fautif dans un test vert.
+- **Après un import upstream**, un test rouge est soit une régression, soit un
+  changement voulu par upstream. Dans le second cas on adapte le test dans le
+  commit d'import, en le disant dans le message.
+- **Aucun réseau.** Un test QML qui instancie `main.qml` ou `ShellPage` doit
+  neutraliser `UpdateManager` (voir `tst_settingssanitize.qml`) : sinon chaque
+  exécution interrogerait GitHub.
+- **Prouver qu'un test peut échouer** : injecter la régression dans une copie
+  du module hors dépôt, pointer le chargeur dessus, constater l'échec.
+
 ## Limite connue
 
 Le lint (`qmllint`) et les tests Qt Quick Test tournent sous **Qt 6**
