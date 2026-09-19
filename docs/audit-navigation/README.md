@@ -115,6 +115,50 @@ Ce que ce relevé a montré, et ce qui en a été fait (lot 3) :
 - **Page saison** : épisodes prêts à 130 ms, rideau levé à 990 ms. → plancher
   de 350 ms supprimé, délégué de l'épisode cible exigé.
 
+## Mesures 3 à 5 : deux régressions, puis l'état final (19 septembre 2026)
+
+- **Mesure 3 — rideau infini au retour à l'accueil après une lecture.** Un type
+  QML en cache se construit de façon **synchrone** : `homeLoader.onLoaded`
+  s'exécutait pendant l'affectation de la source, avant que `_homeVisible` soit
+  posé, prenait l'instance pour abandonnée et vidait la source en pleine
+  évaluation (« Binding loop detected for property "source" », écriture ignorée
+  par Qt). Résultat : une HomePage jamais initialisée et un rideau que rien ne
+  relâchait. Invisible au premier lancement (chargement asynchrone) et non
+  reproductible sous Qt 6.
+- **Mesures 3 et 4 — accueil en 14,5 s.** `HomeGatePolicy.canFinish()` servait
+  aussi d'étape « données », avec un état sans `revealReady` : la porte se
+  bloquait avant de lancer la préparation du focus et ne cédait qu'au délai de
+  secours. Les tests exerçaient la fonction, pas l'enchaînement de HomePage.
+  Leçon : tester un module pur **dans la séquence d'appels de la page**.
+- **Mesure 5 — état final.**
+
+| Navigation | Mesure 1 | Mesure 5 |
+| --- | --- | --- |
+| Fiche film déjà visitée | 2,6 s | 0,69 – 0,97 s |
+| Fiche série déjà visitée | 2,5 s | 0,58 s |
+| Bibliothèque, type déjà visité | 2,4 s | 1,07 s |
+| Retour à une bibliothèque (début de liste) | 2,2 s | 1,22 s |
+| Retour à une bibliothèque (rang 23 à 46) | — | 2,1 – 3,3 s |
+| Retour à l'accueil résident | 3,7 s | 1,35 s (réaffiché en 0,56 s) |
+| Retour à l'accueil après une lecture | 3,7 s | 3,8 s |
+| Accueil au démarrage | 5,6 s | 5,2 s |
+| Page saison, 1ʳᵉ visite | 3,4 s | 2,7 s |
+
+Pistes relevées dans la mesure 5 et laissées en l'état (décision de
+l'utilisateur : le résultat est jugé convenable) :
+
+- première visite d'un type de page : 1,3 à 2,2 s de compilation, évitables en
+  précompilant les pages pendant que l'accueil est au repos ;
+- accueil résident : 0,8 s de restauration de focus rejouée alors que rien n'a
+  bougé ; accueil reconstruit après lecture : 3,8 s ;
+- accueil au démarrage : la publication de « Récemment ajouté » (0,97 s de
+  blocage) tombe dans la fenêtre de stabilité de la porte et la relance ; deux
+  planchers de 900 ms (`afterFetchedOnceMinMs`, `minLoadingMs`) ;
+- cache de grille : 0,4 s inexpliquées entre `GRID2` et `GRID7 cache hit` ; seule
+  la première page de 50 est mémorisée, d'où deux affectations du modèle quand
+  on revient loin dans la liste ;
+- page saison : conditions réunies à 464 ms, rideau levé à 1 094 ms.
+
 ## État des constats
 
 Traité (lot 1, correctifs ponctuels, un commit et un test chacun) :

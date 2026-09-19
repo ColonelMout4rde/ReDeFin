@@ -53,9 +53,14 @@
  *   est vrai ; sinon elle reprend exactement les noms utilisés par les
  *   traces "HOME1 gate blocked cause=…" historiques.
  */
-function canFinish(state) {
+/* Première étape de la porte : les DONNÉES du premier écran sont-elles là ?
+ * HomePage ne prépare le focus (prepareHomeReveal, effet de bord) qu'une fois
+ * cette étape passée, puis appelle canFinish() avec le résultat. Cette étape
+ * ne regarde donc PAS revealReady : l'y inclure bloquait la porte avant même
+ * que la préparation soit lancée, et l'accueil ne s'ouvrait plus qu'à son
+ * délai de secours (14,5 s mesurées sur Révolution). */
+function dataReady(state) {
     state = state || {};
-
     if (!state.hasPosterGrid) return { finish: false, cause: "no-postergrid" };
     if (state.fetchedOnce !== true) return { finish: false, cause: "fetchedOnce" };
     if (state.libraryFetchCompleted !== true) return { finish: false, cause: "libraryFetchCompleted" };
@@ -66,6 +71,13 @@ function canFinish(state) {
         return { finish: false, cause: "latestFetchCompleted" };
     }
 
+    return { finish: true, cause: "" };
+}
+
+function canFinish(state) {
+    state = state || {};
+    var data = dataReady(state);
+    if (!data.finish) return data;
     if (state.revealReady !== true) return { finish: false, cause: "homeRevealReady" };
 
     if (state.waitForHomePosters === true && state.postersReady !== true) {

@@ -35,6 +35,72 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
   second appui long dans les quatre secondes. Auparavant, un OK maintenu une
   seconde de trop supprimait le profil et sa session sans prévenir.
 
+### Navigation plus rapide
+
+La navigation dans les menus a été mesurée sur une Freebox Révolution, écran
+par écran, puis reprise. Temps entre l'appui sur OK et la page utilisable :
+
+| Parcours | Premier relevé | Cette version |
+| --- | --- | --- |
+| Ouvrir la fiche d'un film (à partir du 2ᵉ de la session) | 2,6 s | 0,7 à 1,0 s |
+| Ouvrir la fiche d'une série (à partir de la 2ᵉ) | 2,5 s | 0,6 s |
+| Ouvrir une bibliothèque (à partir de la 2ᵉ) | 2,4 s | 1,1 s |
+| Revenir d'une fiche à la bibliothèque | 2,2 s | 1,2 s |
+| Revenir à l'accueil depuis une bibliothèque ou une fiche | 3,7 s | 1,4 s |
+| Page d'une saison (1ʳᵉ de la session) | 3,4 s | 2,7 s |
+| Accueil au lancement | 5,6 s | 5,2 s |
+
+Le premier relevé a été fait après une première série de corrections : la
+version officielle est au moins aussi lente que cette colonne. Non mesuré mais
+corrigé : la fiche d'une série entièrement vue restait 2,6 s de plus sur
+l'indicateur de chargement (voir « Corrigé »).
+
+La toute première fiche film, fiche série, bibliothèque ou saison d'une session
+reste plus longue (2 à 2,7 s) : le Player doit lire une fois chaque écran. Le
+retour à l'accueil après la lecture d'une vidéo n'a pas changé (environ 3,8 s) :
+l'accueil est libéré pendant la lecture pour laisser la mémoire au lecteur.
+
+Ce qui a changé :
+
+- **Les pages s'affichent dès qu'elles sont utilisables, les images arrivent
+  ensuite.** L'indicateur de chargement attendait que tout soit décodé : fond,
+  logo, affiches voisines, rangées secondaires. Il ne protège plus que ce qui
+  gênerait vraiment : focus non posé, saut de mise en page. Les affiches et
+  les fonds apparaissent en fondu dans la page déjà affichée.
+- **Un écran déjà visité n'est plus relu à chaque fois.** Chaque film, chaque
+  retour dans une bibliothèque faisait relire et préparer l'écran complet par
+  le Player : 1,1 à 1,6 s mesurées à chaque navigation, contre 0,1 s
+  désormais. C'est le gain le plus important.
+- **L'accueil reste en mémoire** pendant la visite d'une bibliothèque ou d'une
+  fiche et réapparaît tel qu'on l'a quitté, sans être reconstruit. Il est
+  toujours libéré pendant la lecture et au changement de profil.
+- **Accueil** : affiché dès que « Mes médias », « Reprendre » et « À suivre »
+  sont prêts, les rangées « Récemment ajouté » arrivent ensuite en une fois ;
+  une seconde d'attente fixe supprimée ; remonter vers une rangée « Récemment
+  ajouté » éloignée n'affiche plus « Rechargement… ».
+- **Bibliothèques** : au retour d'une fiche, la grille déjà consultée
+  s'affiche depuis la mémoire puis se met à jour si quelque chose a changé
+  (vu, reprise, nouveaux titres) ; l'attente de 1,1 s de stabilisation a
+  disparu ; glissement plus régulier dans les grandes grilles, la rangée
+  suivante est prête avant la fin du glissement.
+- **Fiches film, série et collection** : affichées dès que l'en-tête est
+  prêt ; « À suivre », Saisons, Distribution et Titres similaires
+  apparaissent juste après, à leur place réservée ; le fond part 0,3 s plus
+  tôt ; le logo est demandé à sa taille d'affichage (il l'était en 900 × 900) ;
+  les saisons sont demandées en même temps que la série.
+- **Page d'une saison** : affichée dès que les épisodes sont prêts, sans
+  délai minimal ; les flèches répondent dès l'ouverture.
+- **Moins de requêtes et de données** : une requête en moins pour les
+  chapitres d'un film et pour les saisons d'une série ; la durée moyenne des
+  épisodes ne télécharge plus la liste complète des épisodes à chaque
+  ouverture (elle peut être très légèrement moins exacte) ; les informations
+  techniques du titre sélectionné dans une bibliothèque passent par une
+  requête bien plus légère ; les listes ne demandent que les types d'images
+  affichés ; l'avatar du profil et les affiches de l'accueil sont demandés à
+  leur taille d'affichage.
+
+Non testé sur Freebox Delta / Devialet. Le lecteur vidéo n'est pas concerné.
+
 ### Modifié
 
 - **Un réglage changé pendant une pause ne relance plus la lecture.** Piste
@@ -44,54 +110,6 @@ Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
   sur-le-champ, avec un éclat d'image et de son malgré la pause. En cours de
   lecture, rien ne change. Les sous-titres texte locaux en DirectPlay restent
   instantanés.
-- **Navigation dans les menus nettement plus rapide.** Principe nouveau : une
-  page s'affiche dès qu'elle est utilisable et ses images arrivent ensuite en
-  fondu, au lieu d'attendre derrière l'indicateur de chargement que tout soit
-  décodé. *Relevés sur Révolution : une fiche série déjà visitée passe de 2,5 s
-  à 0,5 s, une fiche film de 2,6 s à 0,9 s, le retour à une bibliothèque de
-  2,3 s à 1,3 s. Les derniers changements (accueil conservé en mémoire, accueil
-  au démarrage, cache des bibliothèques, page saison) restent à mesurer.*
-  - **Toutes les pages** : une page d'un type déjà visité (deuxième fiche,
-    retour à une bibliothèque, à l'accueil) n'est plus recompilée à chaque
-    fois. Mesuré sur Révolution : 1,1 à 1,6 s de construction par navigation,
-    contre environ 0,1 s quand la page est déjà connue. L'indicateur de
-    chargement se lève en outre dès que la page a fini de charger (jusqu'à
-    240 ms de moins), et son animation allégée laisse le processeur à la page
-    en construction.
-  - **Retour à l'accueil** : l'accueil reste en mémoire pendant la visite
-    d'une bibliothèque ou d'une fiche et réapparaît sans être reconstruit
-    (mesuré à 3,7 s avant ce changement). Il est toujours libéré pendant la
-    lecture d'une vidéo et au changement de profil.
-  - **Accueil au démarrage** : affiché dès que « Mes médias », « Reprendre » et
-    « À suivre » sont prêts ; les rangées « Récemment ajouté » arrivent
-    ensuite, en une seule fois. Environ une seconde d'attente fixe en moins
-    après la dernière réponse du serveur ; au retour sur l'accueil, les affiches ne
-    retiennent plus l'affichage au-delà de 300 ms ; remonter vers une rangée
-    « Récemment ajouté » éloignée n'affiche plus « Rechargement… ».
-  - **Bibliothèques** : au retour depuis une fiche, la grille déjà consultée
-    s'affiche tout de suite depuis la mémoire, puis se met à jour si quelque
-    chose a changé (vu, reprise, nouveaux titres) ; ce retour n'impose plus
-    1,1 s de stabilisation ; la première ouverture envoie sa requête sans
-    délai ; glissement plus régulier dans les grandes grilles, la
-    rangée suivante est prête avant la fin du glissement ; les informations
-    techniques du titre sélectionné se chargent par une requête bien plus
-    légère.
-  - **Fiches film, série et collection** : affichage dès que l'en-tête est
-    prêt ; « À suivre », Saisons, Distribution et Titres similaires
-    apparaissent juste après, à leur place réservée ; le fond part environ 300 ms plus tôt ; le logo est demandé à sa
-    taille d'affichage (il l'était en 900 × 900) ; les saisons sont demandées
-    en même temps que la série ; une requête en moins pour les chapitres ; la
-    durée moyenne des épisodes ne télécharge plus la liste complète des
-    épisodes à chaque ouverture (elle peut être légèrement moins exacte).
-  - **Page d'une saison** : affichée dès que les épisodes sont prêts, sans
-    attendre le logo, le fond ni la fiche détaillée de l'épisode, et sans
-    délai minimal d'affichage du chargement ; les flèches répondent dès
-    l'ouverture.
-  - **Serveur moins sollicité** : les listes ne demandent plus que les types
-    d'images réellement affichés ; l'avatar du profil est demandé à sa taille
-    d'affichage au lieu du fichier d'origine ; les affiches de l'accueil sont
-    demandées un peu moins grandes (la version haute définition de la carte
-    sélectionnée est inchangée).
 - **Resélectionner le réglage déjà actif ne fait plus rien.** Choisir la piste
   audio, le sous-titre ou la qualité déjà cochés relançait une négociation
   complète, donc plusieurs secondes de chargement pour un résultat identique,
