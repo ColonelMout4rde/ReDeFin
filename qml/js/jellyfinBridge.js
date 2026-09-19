@@ -639,6 +639,10 @@ function _apiIsUserItemDetailsUrl(url) {
     url = _s(url);
     if (url.indexOf("/Items/") < 0) return false;
     if (url.indexOf("/Items?") >= 0) return false;
+    // /Items/Latest est une collection, pas la fiche d'un item : « Latest »
+    // n'est pas un identifiant. La confondre avec une fiche lui imposerait le
+    // TTL court des fiches et fausserait l'invalidation par identifiant.
+    if (url.indexOf("/Items/Latest") >= 0) return false;
     if (url.indexOf("/Images/") >= 0) return false;
     if (url.indexOf("/PlaybackInfo") >= 0) return false;
     if (url.indexOf("/UserData") >= 0) return false;

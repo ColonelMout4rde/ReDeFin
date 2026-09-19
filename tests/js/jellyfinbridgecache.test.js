@@ -185,13 +185,36 @@ test('cache : chaque route a sa durée de vie', () => {
                2500, 'fiche item');
 });
 
-test('cache : « Derniers ajouts » doit tenir les 120 s annoncées par _apiGetTtlMs',
-     { todo: '/Items/Latest?... satisfait _apiIsUserItemDetailsUrl() (jellyfinBridge.js:638), testé AVANT la branche /Items/Latest de _apiGetTtlMs (:626) : la rangée est donc recachée 2,5 s au lieu de 120 s, et chaque retour sur HomePage la recharge' },
-     () => {
-         verifieTtl((b, r) => b.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10,
-                                                              r.onSuccess, r.onError),
-                    120000, 'Items/Latest');
-     });
+test('cache : « Derniers ajouts » tient les 120 s annoncées par _apiGetTtlMs', () => {
+    // /Items/Latest?UserId=... ressemble à une fiche d'item : s'il est pris
+    // pour tel, la rangée retombe au TTL de 2,5 s et chaque retour sur
+    // HomePage la recharge, ce qui est coûteux sur Révolution.
+    verifieTtl((b, r) => b.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10,
+                                                         r.onSuccess, r.onError),
+               120000, 'Items/Latest');
+});
+
+test('cache : « Derniers ajouts » ne s\'invalide que par son ParentId', () => {
+    const h = createBridge();
+    h.bridge.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10,
+                                           recorder().onSuccess, recorder().onError);
+    h.last().respondJson({ Items: [{ Id: 'a' }] });
+
+    // « Latest » n'est pas un identifiant d'item : aucune invalidation de
+    // fiche ne doit atteindre la rangée.
+    assert.equal(h.bridge.evictUserItemApiCache('Latest'), false);
+    h.bridge.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10,
+                                           recorder().onSuccess, recorder().onError);
+    h.flush();
+    assert.equal(h.sentCount(), 1, 'la rangée doit rester en cache');
+
+    // La voie prévue, elle, fonctionne toujours.
+    assert.equal(h.bridge.evictLatestParentApiCache('p1'), true);
+    h.bridge.fetchHomeLatestItemsForParent(LAN, TOKEN, USER, 'p1', 10,
+                                           recorder().onSuccess, recorder().onError);
+    h.flush();
+    assert.equal(h.sentCount(), 2);
+});
 
 test('cache : une erreur n\'est jamais mémorisée comme une réponse', () => {
     const h = createBridge();
