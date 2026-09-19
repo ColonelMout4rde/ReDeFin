@@ -262,6 +262,16 @@ function _callSetFbx(api, fbxCtx) {
     } catch (e) {}
 }
 
+// Repli sur le Core neutre : seul le Core lui-même peut retirer la policy
+// matérielle, sans quoi le DeviceProfile de l'appareil précédemment résolu
+// continuerait d'être envoyé à Jellyfin.
+function _uninstallCoreDevicePolicy() {
+    try {
+        if (JFCore && typeof JFCore.setDevicePolicy === "function")
+            JFCore.setDevicePolicy(null)
+    } catch (e) {}
+}
+
 function _primeSelectedBackendWithFbx() {
     // Important Freebox/QML: on initialise le Core pour les fonctions neutres
     // metadata/streams/subtitles, puis uniquement le backend playback choisi.
@@ -271,6 +281,8 @@ function _primeSelectedBackendWithFbx() {
     var api = _backend()
     if (api !== JFCore)
         _callSetFbx(api, _fbx)
+    else
+        _uninstallCoreDevicePolicy()
 }
 
 /* ================== Configuration publique ================== */
@@ -324,6 +336,8 @@ function negotiatePlayback(ctx, onSuccess, onError) {
     // juste avant la négociation, sans toucher aux backends non sélectionnés.
     if (api && api !== JFCore)
         _callSetFbx(api, _fbx)
+    else if (api === JFCore)
+        _uninstallCoreDevicePolicy()
 
     if (ctx) {
         try {

@@ -337,23 +337,31 @@ test('changer de policy matérielle vide le cache de négociation', () => {
     assert.equal(bodies[1].DeviceProfile.Name, 'Freebox-Devialet');
 });
 
+test('revenir à un modèle inconnu désinstalle la policy matérielle précédente', () => {
+    // Seul le Core peut retirer sa policy : Revolution et Devialet ne savent
+    // qu'installer la leur. Sans désinstallation, un repli sur le Core neutre
+    // continuerait d'envoyer le DeviceProfile du matériel précédent.
+    const { Router, bodies } = loadRouter(MEDIA);
+    const ctx = () => ({ serverUrl: SERVER, accessToken: 'TOK', itemId: 'IT1', userId: 'U1', startMs: 0 });
+
+    Router.setDeviceMode('revolution');
+    Router.negotiatePlayback(ctx(), () => {}, () => {});
+    Router.setDeviceMode('modele-inconnu');
+    Router.negotiatePlayback(ctx(), () => {}, () => {});
+
+    assert.equal(bodies.length, 2, 'le changement de policy vide aussi le cache');
+    assert.equal(bodies[0].DeviceProfile.Name, 'Freebox-Revolution');
+    assert.equal(bodies[1].DeviceProfile.Name, 'Freebox-Qt5');
+
+    // Et le chemin de câblage fbx donne le même résultat.
+    Router.setDeviceMode('devialet');
+    Router.setFbx({});
+    Router.setDeviceMode('core');
+    Router.negotiatePlayback(ctx(), () => {}, () => {});
+    assert.equal(bodies[bodies.length - 1].DeviceProfile.Name, 'Freebox-Qt5');
+});
+
 /* ===== 7. Bugs suspectés (non figés) ===== */
-
-test('revenir à un modèle inconnu doit désinstaller la policy matérielle précédente',
-    { todo: 'le Core garde la dernière policy : un repli « core » conserve le profil du matériel précédent' }, () => {
-        // JellyfinPlaybackRouter._primeSelectedBackendWithFbx() n'appelle
-        // Core.setDevicePolicy() que pour Revolution/Devialet ; aucun chemin
-        // ne repose la policy à null quand le mode résolu redevient « core ».
-        const { Router, bodies } = loadRouter(MEDIA);
-        const ctx = () => ({ serverUrl: SERVER, accessToken: 'TOK', itemId: 'IT1', userId: 'U1', startMs: 0 });
-
-        Router.setDeviceMode('revolution');
-        Router.negotiatePlayback(ctx(), () => {}, () => {});
-        Router.setDeviceMode('modele-inconnu');
-        Router.negotiatePlayback(ctx(), () => {}, () => {});
-
-        assert.equal(bodies[bodies.length - 1].DeviceProfile.Name, 'Freebox-Qt5');
-    });
 
 test('la Révolution doit pouvoir recevoir un ASS/SSA embarqué par le serveur',
     { todo: 'ass/ssa manquent des SubtitleProfiles Révolution alors que le Core demande SubtitleMethod=Embed' }, () => {
