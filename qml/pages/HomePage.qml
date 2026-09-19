@@ -479,7 +479,10 @@ FocusScope {
         try {
             if (pg.prepareHomeReveal)
                 pg.prepareHomeReveal(reason || "home-gate")
-        } catch(e0) {}
+        } catch(e0) {
+            // Une exception ici bloquerait la porte sans laisser de trace.
+            if (DevLog.ENABLED) DevLog.log("HOME1", "prepareHomeReveal exception " + e0)
+        }
         try {
             if (pg.homeRevealReady !== undefined)
                 return pg.homeRevealReady === true
@@ -591,7 +594,12 @@ FocusScope {
     // ne duplique aucune logique (elle se contente de nommer la branche déjà
     // décidée avant chaque « return false ») afin de ne jamais introduire de
     // second calcul qui diverge de celui qui gouverne réellement le rideau.
+    // Une ligne par CHANGEMENT de cause : la porte est sondée toutes les
+    // ~40 ms et noyait le journal sous des centaines de lignes identiques.
+    property string _lastGateBlockedCause: ""
     function _traceGateBlocked(cause) {
+        if (!DevLog.ENABLED || cause === _lastGateBlockedCause) return
+        _lastGateBlockedCause = cause
         if (DevLog.ENABLED) DevLog.log("HOME1", "gate blocked cause=" + cause + " dt=" + (_nowMs() - _loadingStartMs)
                     + " sinceCreate=" + (_nowMs() - _t0))
     }
@@ -624,7 +632,8 @@ FocusScope {
             latestFetchCompleted: !!(pg && pg.latestFetchCompleted),
             pendingFocusRestoreTargetsLatest: pendingLatestFocus
         };
-        var early = HomeGatePolicy.canFinish(earlyState);
+        // Étape « données » seulement : revealReady n'existe pas encore ici.
+        var early = HomeGatePolicy.dataReady(earlyState);
         if (!early.finish) { _traceGateBlocked(early.cause); return false; }
 
         if (_fetchedOnceAtMs === 0) {
@@ -673,6 +682,7 @@ FocusScope {
         }
 
         if (_canFinishGate()) {
+            _lastGateBlockedCause = ""
             _waitForHomePosters = false
             _homeVisualReturnPrepared = false
             _loading = false;

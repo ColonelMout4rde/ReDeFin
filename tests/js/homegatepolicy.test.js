@@ -109,3 +109,44 @@ test('retour rapide (fastHomeReturn) : des délais nuls ne bloquent rien', () =>
     assert.equal(r.finish, false);
     assert.equal(r.cause, 'settleMs');
 });
+
+// Régression constatée sur boîtier : HomePage interroge la porte en DEUX temps
+// (données, puis préparation du focus, puis porte complète). Le premier temps
+// passait par canFinish() sans revealReady, donc répondait toujours
+// « homeRevealReady » : la préparation n'était jamais lancée et l'accueil ne
+// s'ouvrait qu'au délai de secours (14,5 s au démarrage comme au retour).
+test('étape « données » : ne dépend pas de revealReady, que HomePage ne connaît pas encore', () => {
+  const early = {
+    hasPosterGrid: true, fetchedOnce: true, libraryFetchCompleted: true,
+    resumeFetchCompleted: true, nextUpFetchCompleted: true,
+    latestFetchCompleted: false, pendingFocusRestoreTargetsLatest: false
+  };
+  const r = Policy.dataReady(early);
+  assert.equal(r.finish, true);
+  assert.equal(r.cause, '');
+  // La porte complète, elle, attend bien la préparation du focus.
+  assert.equal(Policy.canFinish(early).cause, 'homeRevealReady');
+  assert.equal(Policy.canFinish(Object.assign({}, early, { revealReady: true })).finish, true);
+});
+
+test('étape « données » : mêmes refus que la porte complète, dans le même ordre', () => {
+  assert.equal(Policy.dataReady({}).cause, 'no-postergrid');
+  assert.equal(Policy.dataReady({ hasPosterGrid: true }).cause, 'fetchedOnce');
+  assert.equal(Policy.dataReady({
+    hasPosterGrid: true, fetchedOnce: true, libraryFetchCompleted: true,
+    resumeFetchCompleted: true, nextUpFetchCompleted: true,
+    pendingFocusRestoreTargetsLatest: true, latestFetchCompleted: false
+  }).cause, 'latestFetchCompleted');
+});
+
+test('câblage HomePage : données -> préparation du focus -> porte complète', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'qml', 'pages', 'HomePage.qml'), 'utf8');
+  const fn = src.slice(src.indexOf('function _canFinishGate()'), src.indexOf('function tryFinishGate('));
+  const iData = fn.indexOf('HomeGatePolicy.dataReady(earlyState)');
+  const iPrepare = fn.indexOf('_preparePosterGridForReveal(');
+  const iFull = fn.indexOf('HomeGatePolicy.canFinish(timedState)');
+  assert.ok(iData > 0 && iPrepare > iData && iFull > iPrepare);
+  assert.ok(fn.indexOf('HomeGatePolicy.canFinish(earlyState)') < 0, 'la porte complète ne doit pas servir d\'étape « données »');
+});
