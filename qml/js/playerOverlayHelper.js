@@ -18,6 +18,7 @@
  */
 .import "SafeLog.js" as SafeLog
 .import "MediaCatalog.js" as MediaCatalog
+.import "DeferredReload.js" as DR
 
 /* ===== Utils sûrs ===== */
 function _s(v) { return (v === undefined || v === null) ? "" : (v + ""); }
@@ -1465,6 +1466,50 @@ function handleQualityDirectPlay(root, mp) {
     })
     return true
 }
+/* ===== Sélections de réglages appliquées (Audio / Sous-titres / Qualité) ===== */
+/*
+ * Ces trois fonctions décrivent la ligne que le panneau de réglages affiche
+ * comme appliquée. Elles sont la référence de « déjà actif » : resélectionner
+ * cette ligne ne doit déclencher ni appel réseau, ni changement d'état.
+ */
+function currentAudioSelection(root) {
+    var uiIndex = -1;
+    try { uiIndex = root._effectiveAudioUiIndexForSettings(); } catch(e0) { uiIndex = -1; }
+    var stream = (typeof root.selectedAudioStream === "number" && root.selectedAudioStream >= 0)
+            ? root.selectedAudioStream
+            : ((typeof root.effectiveAudioStream === "number") ? root.effectiveAudioStream : -1);
+    return DR.audioSelection(stream, uiIndex, root.manualDirectPlayMode === true);
+}
+function currentSubtitleSelection(root) {
+    var uiIndex = -1;
+    try { uiIndex = root._effectiveSubtitleUiIndexForSettings(); } catch(e0) { uiIndex = -1; }
+    var stream = -1;
+    if (root.useLocalSubs === true && typeof root.localSubStreamIndex === "number" && root.localSubStreamIndex >= 0)
+        stream = root.localSubStreamIndex;
+    else if (typeof root.selectedSubtitleStream === "number" && root.selectedSubtitleStream >= 0)
+        stream = root.selectedSubtitleStream;
+    else if (typeof root.effectiveSubtitleStream === "number")
+        stream = root.effectiveSubtitleStream;
+    return DR.subtitleSelection(stream, uiIndex);
+}
+function currentQualitySelection(root) {
+    var value = DR.QUALITY_AUTO;
+    try { value = root._activeQualityChoiceValue(); } catch(e0) { value = DR.QUALITY_AUTO; }
+    return DR.qualitySelection(value);
+}
+/*
+ * Décision d'application d'un réglage choisi par l'utilisateur.
+ * Renvoie "applyNow" ou "noop".
+ */
+function decideSettingChange(root, pick, active) {
+    if (DR.sameSelection(pick, active)) return "noop";
+    return "applyNow";
+}
+function decideQualityChoice(root, requested) {
+    var pick = DR.qualitySelection(requested);
+    if (pick.value === DR.QUALITY_NONE) return "noop";
+    return decideSettingChange(root, pick, currentQualitySelection(root));
+}
 function _audioSwitchTransactionExtra(root) {
     return {
         audioSwitchTransaction: true,
@@ -1546,6 +1591,18 @@ function handleAudioPick(root, streamIdx, uiIdx, explicitManualDirectPlay, targe
         root.resetControlsTimer()
         return true
     }
+    // Resélectionner la piste déjà cochée ne doit rien déclencher : ni POST
+    // PlaybackInfo, ni transcodage, ni changement d'état UI. Le rejeu issu du
+    // scrub (targetUiOverride) reste toujours appliqué tel quel.
+    if (targetUiOverride === undefined || targetUiOverride === null) {
+        var pick = DR.audioSelection(serverPick ? streamIdx : -1, uiIdx,
+                                     explicitManualDirectPlay === true)
+        if (decideSettingChange(root, pick, currentAudioSelection(root)) === "noop") {
+            root.audioMenuVisible = false
+            root.resetControlsTimer()
+            return true
+        }
+    }
 
     var transaction = _audioSwitchTransactionExtra(root)
     root.audioIndex = uiIdx
@@ -1612,6 +1669,13 @@ function handleAudioPick(root, streamIdx, uiIdx, explicitManualDirectPlay, targe
     return true
 }
 function switchServerSubtitleStable(root, reason, streamIdx, listIdx) {
+    // Même règle que pour l'audio : la ligne déjà cochée est un no-op complet.
+    if (decideSettingChange(root, DR.subtitleSelection(streamIdx, listIdx),
+                            currentSubtitleSelection(root)) === "noop") {
+        root.subMenuVisible = false
+        root.resetControlsTimer()
+        return
+    }
     root._localSubtitlePickSeq++
     root.disableLocalSubsOverlay()
     root._autoLocalizeSubStream = -1

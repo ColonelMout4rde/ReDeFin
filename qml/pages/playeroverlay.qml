@@ -1025,6 +1025,27 @@ FocusScope {
     function _qualityStatusText(){
         return JF.qualityStatusText(root, mp)
     }
+    // Valeur du panneau Qualité vidéo réellement cochée, avec exactement le
+    // même ordre de priorité que PlayerSettingsOverlay._appliedIndex().
+    function _activeQualityChoiceValue(){
+        if (_qualityOriginalDirectPlaySelected()) return -1
+        if (_qualityRemuxSelected()) return -2
+        if (_qualityAutomaticServerSelected()) return -3
+        if (manualQualityBitrate > 0) return manualQualityBitrate
+        return -3
+    }
+    // Point d'entrée unique du panneau Qualité vidéo : une seule place décide
+    // d'ignorer, de différer ou d'appliquer un choix de qualité.
+    function _applyQualityChoice(requested){
+        requested = Math.floor(Number(requested || 0))
+        if (requested === 0) return false
+        if (H.decideQualityChoice(root, requested) === "noop") return true
+        if (requested === -3) return _applyAutomaticQualityFromQuality()
+        if (requested === -2) return _applyManualRemuxFromQuality()
+        if (requested === -1) return _applyOriginalDirectPlayFromQuality()
+        manualRemuxMode = false
+        return H.applyManualQuality(root, mp, requested)
+    }
     function _effectiveTopBarTitle(){
         // Tant que le logo n'est pas réellement prêt, le titre conserve son fallback centré. Dès qu'un logo est confirmé Ready, le TopBar central se libère. Pour un épisode, le titre est alors rendu juste sous le logo par episodeLogoTitle ci-dessous.
         return _topBarLogoReadyForCurrent ? "" : (currentItemTitle || "")
@@ -2435,17 +2456,7 @@ FocusScope {
         target: settingsOverlayLoader.item
         ignoreUnknownSignals: true
         function onRequestQuality(bitrate){
-            var requested = Math.floor(Number(bitrate || 0))
-            if (requested === -3) {
-                _applyAutomaticQualityFromQuality()
-            } else if (requested === -2) {
-                _applyManualRemuxFromQuality()
-            } else if (requested === -1) {
-                _applyOriginalDirectPlayFromQuality()
-            } else {
-                manualRemuxMode = false
-                H.applyManualQuality(root,mp,requested)
-            }
+            _applyQualityChoice(bitrate)
             controlsFocus=cF_QUALITY
             root.forceActiveFocus()
             resetControlsTimer()
