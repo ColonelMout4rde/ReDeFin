@@ -282,6 +282,47 @@ test('itemImageUrl : un token recopié dans l\'URL du serveur ne ressort jamais'
     assert.equal(url.indexOf('ApiKey'), -1);
 });
 
+/*
+ * itemImageUrl mémoïse la base normalisée sur son dernier appel (une seule
+ * entrée) pour éviter de refaire normalizeServerUrl 2 à 3 fois par carte de
+ * grille avec un serveur inchangé (audit réseau, M1). Les tests ci-dessous
+ * vérifient que le résultat reste identique à ce que produirait un calcul
+ * non mémoïsé (comparaison indépendante via normalizeServerUrl) sur une
+ * matrice de formes de serveur, et que la mémoïsation ne fait fuir aucun
+ * résultat d'un serveur vers l'appel suivant lorsqu'il change.
+ */
+test('itemImageUrl : la mémoïsation de la base ne change aucune sortie (matrice de serveurs)', () => {
+    const table = [
+        [LAN, 'i1', 'Primary', 't'],
+        [LAN + '/', 'i1', 'Primary', 't'],
+        [LAN + '///', 'i1', 'Primary', 't'],
+        ['HTTP://192.168.1.5:8096', 'i1', 'Primary', 't'],
+        [LAN + '/jellyfin', 'i1', 'Primary', 't'],
+        [LAN + '/Jellyfin', 'i1', 'Primary', 't'],
+        [LAN, 'i2', 'Backdrop', ''],
+        [LAN, 'i3', 'Logo', 'tag&x'],
+    ];
+    for (const [server, id, type, tag] of table) {
+        const url = B.itemImageUrl(server, id, type, tag);
+        const expectedBase = B.normalizeServerUrl(server, true);
+        assert.equal(pathOf(url), expectedBase + '/Items/' + encodeURIComponent(id) + '/Images/' + encodeURIComponent(type),
+            JSON.stringify([server, id, type, tag]));
+        if (tag) assert.equal(queryOf(url).tag, tag);
+    }
+});
+
+test('itemImageUrl : recalcule la base dès que le serveur change, sans fuite entre appels alternés', () => {
+    const other = 'http://autre.exemple.test:9000/sub';
+    const a1 = B.itemImageUrl(LAN, 'i1', 'Primary', 't1');
+    const b1 = B.itemImageUrl(other, 'i2', 'Backdrop', 't2');
+    const a2 = B.itemImageUrl(LAN, 'i1', 'Primary', 't1');
+    const b2 = B.itemImageUrl(other, 'i2', 'Backdrop', 't2');
+    assert.equal(a2, a1);
+    assert.equal(b2, b1);
+    assert.equal(pathOf(a1), B.normalizeServerUrl(LAN, true) + '/Items/i1/Images/Primary');
+    assert.equal(pathOf(b1), B.normalizeServerUrl(other, true) + '/Items/i2/Images/Backdrop');
+});
+
 test('itemBackdropOrPrimaryUrl : backdrop prioritaire, repli sur Primary', () => {
     const avecBackdrop = { Id: 'i1', BackdropImageTags: ['bd1'], ImageTags: { Primary: 'p1' } };
     assert.equal(pathOf(B.itemBackdropOrPrimaryUrl(LAN, avecBackdrop)),

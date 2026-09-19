@@ -2575,8 +2575,22 @@ function fetchRandomEpisode(serverUrl, accessToken, userId, parentId, preferUnpl
 // SortName correspond au champ « Titre de tri ». Le nom visible reste uniquement
 // un fallback si le serveur ne renvoie pas SortName. Les égalités sont départagées
 // par Name puis Id afin de conserver un ordre déterministe pendant la pagination.
+// Mémo d'UNE entrée (comme putBoundedMemory le fait ailleurs à plus grande
+// échelle) : une grille rappelle itemImageUrl() 2 à 3 fois par carte avec le
+// même serverUrl, et _normalizeBase() est sinon refait à l'identique à
+// chaque appel. Le serveur ne change pas en cours de session, donc une seule
+// entrée suffit ; un serveur différent invalide simplement le mémo au
+// prochain appel (comparaison stricte de l'entrée brute, avant normalisation).
+var _itemImageUrlBaseCacheIn = undefined;
+var _itemImageUrlBaseCacheOut = "";
+function _itemImageUrlNormalizedBase(serverUrl) {
+    if (serverUrl === _itemImageUrlBaseCacheIn) return _itemImageUrlBaseCacheOut;
+    _itemImageUrlBaseCacheOut = _normalizeBase(serverUrl);
+    _itemImageUrlBaseCacheIn = serverUrl;
+    return _itemImageUrlBaseCacheOut;
+}
 function itemImageUrl(serverUrl, itemId, type, tag, opts) {
-    var u = _normalizeBase(serverUrl);
+    var u = _itemImageUrlNormalizedBase(serverUrl);
     if (!u || !itemId || !type) return "";
     opts = opts || {};
     var q = [];
