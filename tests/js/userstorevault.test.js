@@ -294,10 +294,9 @@ test('une déconnexion (accessToken vide) purge le coffre du profil', () => {
     assert.equal(tokenOf(makeStore(settings), SRV_A, 'u1'), '');
 });
 
-test({ todo: 'BUG : addOrUpdateUser({accessToken:""}) réhydrate le cache RAM '
-           + 'depuis le coffre avant de le purger, le token reste servi '
-           + 'jusqu\'au prochain lancement (UserStore.js:1188 avant :1198).' },
-'une déconnexion purge aussi la copie RAM du token', () => {
+test('une déconnexion purge aussi la copie RAM du token', () => {
+    // Sans attendre un redémarrage : la lecture des profils réinjecte le token
+    // du coffre dans le cache RAM, la purge doit donc passer après elle.
     const { Store } = freshStore();
     login(Store, SRV_A, 'u1', TOKEN_A);
 
@@ -306,6 +305,31 @@ test({ todo: 'BUG : addOrUpdateUser({accessToken:""}) réhydrate le cache RAM '
     });
 
     assert.equal(tokenOf(Store, SRV_A, 'u1'), '');
+    assert.equal(String((Store.getActive() || {}).accessToken || ''), '');
+});
+
+test('une connexion sans mémorisation garde la session de l\'instance courante', () => {
+    // Voisin à ne pas casser : « ne pas mémoriser » n'est pas une déconnexion,
+    // le token fourni doit rester servi tant que l'application tourne.
+    const { settings, Store } = freshStore();
+    login(Store, SRV_A, 'u1', TOKEN_A, false);
+
+    assert.equal(tokenOf(Store, SRV_A, 'u1'), TOKEN_A);
+    assert.equal(settings.usersSessionVaultJson, '{}');
+    assert.equal(tokenOf(makeStore(settings), SRV_A, 'u1'), '');
+});
+
+test('décocher « mémoriser » vide le coffre sans couper la session en cours', () => {
+    // Voisin à ne pas casser : l'appel ne porte pas de champ accessToken, il
+    // ne doit donc toucher qu'à la persistance.
+    const { settings, Store } = freshStore();
+    login(Store, SRV_A, 'u1', TOKEN_A);
+
+    Store.addOrUpdateUser({ serverUrl: SRV_A, userId: 'u1', remember: false });
+
+    assert.equal(settings.usersSessionVaultJson, '{}');
+    assert.equal(tokenOf(Store, SRV_A, 'u1'), TOKEN_A);
+    assert.equal(tokenOf(makeStore(settings), SRV_A, 'u1'), '');
 });
 
 // ---------------------------------------------------------------------------

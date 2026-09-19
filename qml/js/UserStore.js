@@ -1192,10 +1192,16 @@ function addOrUpdateUser(u) {
     var nextRemember = tokenTransportAllowed && _shouldRememberUser(u, previousRemember);
 
     if (hasTokenField) {
-        if (incomingToken && nextRemember)
+        if (incomingToken && nextRemember) {
             _persistTokenToVault(srv, uid, incomingToken);
-        else
+        } else {
             _clearPersistentToken(srv, uid);
+            // _readUsersArr() ci-dessus a pu réinjecter le token du coffre dans
+            // le cache RAM. Sans cette seconde purge, une déconnexion qui garde
+            // le profil continue de servir l'ancienne session à listUsers() et
+            // getActive() jusqu'au prochain lancement de l'application.
+            if (!incomingToken) _clearSessionToken(srv, uid);
+        }
     } else if (_hasOwn(u, "remember") && u.remember !== true) {
         _clearPersistentToken(srv, uid);
     }
