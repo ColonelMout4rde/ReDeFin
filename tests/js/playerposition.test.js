@@ -139,6 +139,26 @@ test('persistable : la position est bornée par la durée totale', () => {
     assert.strictEqual(JF.clampPlayerPersistableUi(root, mp, -1), 0);
 });
 
+test('persistable : sans MediaPlayer, les ticks de l\'item bornent quand même', () => {
+    // _sessionPayload() clampe sans MediaPlayer : la borne doit rester celle
+    // de l'item quand celui-ci a des RunTimeTicks.
+    const { root } = setup({ runtimeTicks: MIN_90 * TICKS_PER_MS });
+    assert.strictEqual(JF.playerDurationMs(root, null), MIN_90);
+    assert.strictEqual(JF.playerPersistableDurationMs(root, null), MIN_90);
+    assert.strictEqual(JF.clampPlayerPersistableUi(root, null, MIN_90 + 60000), MIN_90);
+});
+
+test('persistable : sans MediaPlayer ni ticks, la position passe sans être bornée', () => {
+    // Direct/enregistrement en cours : aucune durée connue. La position doit
+    // traverser telle quelle (jamais négative), surtout pas être ramenée à 0,
+    // sinon le point de reprise du serveur est corrompu.
+    const { root } = setup({ runtimeTicks: 0 });
+    assert.strictEqual(JF.playerDurationMs(root, null), 0);
+    assert.strictEqual(JF.playerPersistableDurationMs(root, null), 0);
+    assert.strictEqual(JF.clampPlayerPersistableUi(root, null, MIN_90), MIN_90);
+    assert.strictEqual(JF.clampPlayerPersistableUi(root, null, -1), 0);
+});
+
 test('persistable : une position nulle n\'écrase pas la dernière position connue', () => {
     const { root, mp } = setup({ runtimeTicks: MIN_90 * TICKS_PER_MS, _lastPersistableUiMs: MIN_5 });
     assert.strictEqual(JF.rememberPlayerPersistablePosition(root, mp, 0, 'test'), MIN_5);
@@ -435,12 +455,19 @@ test('sendStopped : sans position figée, la position persistable est capturée'
     assert.strictEqual(bridge.stopped()[0].payload.PositionTicks, (MIN_5 + 12000) * TICKS_PER_MS);
 });
 
-test('Progress : un item sans RunTimeTicks doit quand même être reporté',
-     { todo: 'BUG JellyfinPlaybackRouter.js:1190 — _sessionPayload() appelle clampPlayerPersistableUi(root, null, p) ; sans runtimeTicks, playerDurationMs() déréférence mediaPlayer.duration sur null et lève une exception, donc ni Playing ni Progress ne partent.' },
-     () => {
+test('Progress : un item sans RunTimeTicks doit quand même être reporté', () => {
     const { root } = reportableRoot({ runtimeTicks: 0 }, { duration: MIN_90 });
     const bridge = fakeBridge();
-    JF.sendProgress(root, bridge, false, MIN_5, null);
+    assert.strictEqual(JF.sendProgress(root, bridge, false, MIN_5, null), true);
     assert.strictEqual(bridge.progress().length, 1);
     assert.strictEqual(bridge.progress()[0].payload.PositionTicks, MIN_5 * TICKS_PER_MS);
+});
+
+test('Playing : un item sans RunTimeTicks doit quand même être annoncé', () => {
+    const { root } = reportableRoot({ runtimeTicks: 0 }, { duration: MIN_90 });
+    const bridge = fakeBridge();
+    JF.sendStartIfNeeded(root, bridge, MIN_5);
+    assert.strictEqual(bridge.starts().length, 1);
+    assert.strictEqual(bridge.starts()[0].payload.PositionTicks, MIN_5 * TICKS_PER_MS);
+    assert.strictEqual(root._startedReported, true);
 });

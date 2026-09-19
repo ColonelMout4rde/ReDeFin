@@ -1030,7 +1030,9 @@ function playerDurationMs(root, mediaPlayer) {
     var full = root.runtimeTicks > 0 ? Math.floor(Number(root.runtimeTicks) / 10000) : 0;
     if (full > 0) return full;
 
-    var local = mediaPlayer.duration > 0 ? Math.floor(Number(mediaPlayer.duration)) : 0;
+    // _sessionPayload() clampe sans MediaPlayer sous la main : sans
+    // RunTimeTicks la durée reste alors inconnue (0) au lieu de lever.
+    var local = (mediaPlayer && mediaPlayer.duration > 0) ? Math.floor(Number(mediaPlayer.duration)) : 0;
     if (root.baseOffsetMs > 0 && local > 0 && (root.serverTimedStream || root.timeShifted))
         local += Math.max(0, Math.floor(Number(root.baseOffsetMs) || 0));
     return Math.max(0, local);
