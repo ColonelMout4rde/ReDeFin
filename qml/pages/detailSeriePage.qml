@@ -1760,6 +1760,14 @@ FocusScope {
         posterLogoFailed=false;
         nextUpDurationText=""; nextUpEndText="";
         _resetAverageEpisodeDuration();
+        // F3 : seul itemId (avec serverUrl/accessToken/userId) est nécessaire
+        // à /Seasons, pas la réponse de fetchItem. Lancer les deux requêtes
+        // en parallèle économise un aller-retour complet sur le chemin du
+        // rideau (gate Saisons, seasonsStrictLoading). Le garde seq de
+        // fetchSeasons() protège déjà une réponse tardive d'une génération
+        // précédente.
+        if (!seasonsFetched && !seasonsFetchInFlight)
+            fetchSeasons()
         _useWarmDetailSnapshot();
         _fetchHandle = Jellyfin.fetchItem(serverUrl, accessToken, itemId,
             function(res){
@@ -1782,6 +1790,11 @@ FocusScope {
                 // utile pour les rafraîchissements suivants (retour Player,
                 // changement d'item sur la même instance de page).
                 backdrop.updateBackdropNow();
+                // F3 : fetchSeasons() est désormais lancé au début de
+                // fetchItemIfReady(), en parallèle de cette requête ; ne pas
+                // le relancer ici sauf s'il n'a jamais démarré (contexte
+                // invalide entre-temps, ou item rafraîchi sans passer par
+                // fetchItemIfReady()).
                 if (!seasonsFetched && !seasonsFetchInFlight)
                     fetchSeasons()
                 serverResponseSlow=false;
