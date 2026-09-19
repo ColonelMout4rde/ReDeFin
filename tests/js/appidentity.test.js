@@ -62,3 +62,11 @@ test("un fork privé n'annonce jamais de canal stable", () => {
     assert.ok(!channels.stable || channels.stable.published !== true,
         'canal stable publié dans updates/manifest.json');
 });
+
+test('la version affichée par le client est celle du manifeste', () => {
+    // APP_VERSION alimente le panneau À propos et l'en-tête envoyé à
+    // Jellyfin ; le manifeste alimente la fiche du paquet.
+    const appVersion = capture('qml/js/clientId.js',
+        /^var APP_VERSION = "([^"]+)";/m);
+    assert.strictEqual(appVersion, JSON.parse(read('manifest.json')).version);
+});

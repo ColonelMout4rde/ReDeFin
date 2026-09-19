@@ -2,7 +2,7 @@
     "name": "ReDeFin-CM",
     "identifier": "com.cm.redefin",
     "description": "Fork non officiel de ReDeFin (Laborantine) par ColonelMout4rde, client Jellyfin pour lire votre bibliothèque sur Freebox",
-    "version": "0.9.6",
+    "version": "0.9.7",
     "author": "ColonelMout4rde",
     "entryPoints": {
         "main": {
