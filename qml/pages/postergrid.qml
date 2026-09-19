@@ -681,6 +681,13 @@ Item {
     property bool _bootFetchPending: false; property string _bootFetchKey: ""; property bool _fetchInFlight: false; property string _activeFetchKey: ""
     property double _lastFetchStartMs: 0; property double _lastHomeCacheWriteMs: 0; property bool _homeImagesReady: false; property bool _homeImageReturnFreeze: false
     property bool _homePosterVisualReady: false; readonly property bool homePosterVisualReady: _homePosterVisualReady; property int homePosterProbeMs: 45; property int homePosterReadySettleMs: 90
+    // Constat 4 de l'audit accueil : le rideau de retour attendait que TOUTES
+    // les affiches visibles soient Ready, sans borne, alors qu'elles sont
+    // re-téléchargées (cache:false). Décision produit : au-delà de cette
+    // borne on révèle quand même, les affiches manquantes arrivent ensuite
+    // derrière leur placeholder/fondu existants.
+    readonly property int homePosterVisualReadyMaxWaitMs: 300
+    property double _homePosterVisualReadyDeadlineMs: 0
     property bool suspendVisualTextures: false; property bool homeCurtainVisible: false; property bool _homeCurtainWarmupLatched: false; property int homeImageSettleMs: 240; property int homeImageReturnFreezeMs: 240
     readonly property bool _homeImageLoadGate: !suspendVisualTextures && _homeImagesReady && (homeCurtainVisible || _homeCurtainWarmupLatched || !_homeImageReturnFreeze)
     onSuspendVisualTexturesChanged: {
@@ -700,9 +707,13 @@ Item {
     onHomeCurtainVisibleChanged: {
         if (homeCurtainVisible) {
             _homeCurtainWarmupLatched = true
+            // Constat 4 : arme la borne de 300 ms au moment précis où le
+            // rideau apparaît, seul point d'entrée de _probeHomePosterVisualReady.
+            _homePosterVisualReadyDeadlineMs = Date.now()
             _scheduleHomePosterVisualProbe()
         } else {
             if (!_homeImageReturnFreeze) _homeCurtainWarmupLatched = false
+            _homePosterVisualReadyDeadlineMs = 0
             homePosterProbeTimer.stop()
             homePosterReadySettleTimer.stop()
         }
@@ -811,6 +822,20 @@ Item {
     function _scheduleHomePosterVisualProbe(){ if (_alive && homeCurtainVisible && !homePosterProbeTimer.running) homePosterProbeTimer.restart() }
     function _probeHomePosterVisualReady() {
         if (!_alive || !homeCurtainVisible) return
+        if (_homePosterVisualReadyDeadlineMs > 0
+                && (Date.now() - _homePosterVisualReadyDeadlineMs) >= homePosterVisualReadyMaxWaitMs) {
+            // Constat 4 : ne plus attendre indéfiniment que toutes les
+            // affiches visibles soient chargées avant de lever le rideau de
+            // retour. Au-delà de la borne, on révèle : le placeholder et le
+            // fondu déjà en place sur chaque carte prennent le relais
+            // pendant que les images arrivent.
+            if (DevLog.ENABLED) DevLog.log("HOME1", "poster-visual-ready timeout dt=" + (Date.now() - _t0))
+            _homePosterVisualReady = true
+            _homePosterVisualReadyDeadlineMs = 0
+            homePosterProbeTimer.stop()
+            homePosterReadySettleTimer.stop()
+            return
+        }
         if (!_hasVisibleHomeData()) {
             _homePosterVisualReady = true
             return
