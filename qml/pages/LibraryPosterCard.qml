@@ -654,51 +654,71 @@ FocusScope {
                     }
                 }
 
-                Rectangle {
+                // F9 (audit-grilles.md) : ces deux badges sont invisibles sur la
+                // grande majorité des cartes (aucune vidéo « vue », aucun compteur
+                // d'épisodes non lus). Un Rectangle simplement visible: false est
+                // quand même créé pour chaque délégué ; le badge « vu » est le cas
+                // le plus coûteux (3 rectangles tournés en antialiasing). Un Loader
+                // actif seulement sur la même condition qu'avant (déplacée sur
+                // active) évite cette création pour tous les autres.
+                Loader {
+                    id: unplayedBadgeLoader
+                    objectName: "unplayedBadgeLoader"
                     z: 20
-                    height: 24
-                    radius: 12
                     anchors.top: parent.top
                     anchors.right: parent.right
                     anchors.topMargin: 6
                     anchors.rightMargin: 6
-                    color: "#3B82F6"
-                    border.color: "#1E3A8A"
-                    border.width: 1
-                    visible: cardRoot.showUnplayedBadge && cardRoot.unplayedCount > 0
-                    width: Math.max(height, unplayedBadgeText.paintedWidth + 12)
-                    Text {
-                        id: unplayedBadgeText
-                        anchors.centerIn: parent
-                        text: cardRoot.unplayedText
-                        color: "white"
-                        font.pixelSize: 13
-                        font.bold: true
+                    active: cardRoot.showUnplayedBadge && cardRoot.unplayedCount > 0
+                    sourceComponent: Component {
+                        Rectangle {
+                            height: 24
+                            radius: 12
+                            color: "#3B82F6"
+                            border.color: "#1E3A8A"
+                            border.width: 1
+                            width: Math.max(height, unplayedBadgeText.paintedWidth + 12)
+                            Text {
+                                id: unplayedBadgeText
+                                anchors.centerIn: parent
+                                text: cardRoot.unplayedText
+                                color: "white"
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                        }
                     }
                 }
 
-                Rectangle {
+                Loader {
+                    id: watchedBadgeLoader
+                    objectName: "watchedBadgeLoader"
                     z: 20
                     width: cardRoot.watchedBadgeSize
                     height: cardRoot.watchedBadgeSize
-                    radius: width / 2
                     x: cardRoot.watchedBadgePosition === "topLeft"
                        ? cardRoot.watchedBadgeMargin
                        : parent.width - width - cardRoot.watchedBadgeMargin
                     y: cardRoot.watchedBadgeMargin
-                    color: "#3B82F6"
-                    border.color: "#1E3A8A"
-                    border.width: 1
-                    visible: cardRoot.showWatchedBadge && cardRoot.watched
-                             && (!cardRoot.suppressWatchedWhenUnplayed
-                                 || !(cardRoot.showUnplayedBadge && cardRoot.unplayedCount > 0))
-                    Item {
-                        anchors.centerIn: parent
-                        width: 15
-                        height: 12
-                        Rectangle { x: 2.1; y: 6.6; width: 5.4; height: 2.1; radius: 1.05; color: "#FFFFFF"; rotation: 42; transformOrigin: Item.Left; antialiasing: true }
-                        Rectangle { x: 5.8; y: 9.1; width: 8.6; height: 2.1; radius: 1.05; color: "#FFFFFF"; rotation: -42; transformOrigin: Item.Left; antialiasing: true }
-                        Rectangle { x: 5.1; y: 8.1; width: 2.0; height: 2.0; radius: 1.0; color: "#FFFFFF"; antialiasing: true }
+                    active: cardRoot.showWatchedBadge && cardRoot.watched
+                            && (!cardRoot.suppressWatchedWhenUnplayed
+                                || !(cardRoot.showUnplayedBadge && cardRoot.unplayedCount > 0))
+                    sourceComponent: Component {
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: width / 2
+                            color: "#3B82F6"
+                            border.color: "#1E3A8A"
+                            border.width: 1
+                            Item {
+                                anchors.centerIn: parent
+                                width: 15
+                                height: 12
+                                Rectangle { x: 2.1; y: 6.6; width: 5.4; height: 2.1; radius: 1.05; color: "#FFFFFF"; rotation: 42; transformOrigin: Item.Left; antialiasing: true }
+                                Rectangle { x: 5.8; y: 9.1; width: 8.6; height: 2.1; radius: 1.05; color: "#FFFFFF"; rotation: -42; transformOrigin: Item.Left; antialiasing: true }
+                                Rectangle { x: 5.1; y: 8.1; width: 2.0; height: 2.0; radius: 1.0; color: "#FFFFFF"; antialiasing: true }
+                            }
+                        }
                     }
                 }
 
@@ -746,6 +766,11 @@ FocusScope {
                 }
             }
 
+            // F9 (audit-grilles.md) proposait de désactiver hoverEnabled, un
+            // Player n'ayant pas de pointeur. Vérifié : moviepage.qml câble
+            // bien onHovered (déplace le focus de la grille), donc quelque
+            // chose s'y connecte réellement — ce n'est pas mort. Laissé tel
+            // quel, la piste ne s'applique pas ici.
             MouseArea {
                 anchors.fill: parent
                 enabled: cardRoot.enableMouseInput
