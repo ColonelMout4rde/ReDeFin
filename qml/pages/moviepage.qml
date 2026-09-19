@@ -12,6 +12,7 @@ import "../js/jellyfinBridge.js" as Jellyfin
 import "../js/MediaCatalog.js" as MediaCatalog
 import "../js/UserStore.js" as UserStore
 import "../js/DevLog.js" as DevLog
+import "../js/GridRevealPolicy.js" as GridReveal
 Item {
     id: moviepage
     width: parent ? parent.width : 1920
@@ -85,8 +86,11 @@ Item {
     property int  folderRestoreVisualTargetIndex: -1
     property int  folderRestoreRevealAttempts: 0
     property real folderRestoreStableSinceMs: 0
-    readonly property int folderRestoreVisualSettleMs: 1100
-    readonly property int folderRestoreRevealMaxAttempts: 80
+    // Valeurs de la politique pure GridRevealPolicy.js : ne plus attendre le
+    // décodage de l'affiche focalisée, seulement une courte stabilité de mise
+    // en page (décision produit, voir le brief « navigation fluide »).
+    readonly property int folderRestoreVisualSettleMs: GridReveal.SETTLE_MS
+    readonly property int folderRestoreRevealMaxAttempts: GridReveal.MAX_ATTEMPTS
     readonly property bool folderBlockingLoading: folderInitialLoading || folderRestoreVisualLoading
     // Le Shell garde son curtain pendant tout le premier cycle de fetch.
     // Cela couvre aussi la courte fenêtre où la restauration de grille n'a pas
@@ -887,40 +891,29 @@ Item {
         repeat: true
         running: false
         onTriggered: {
-            folderRestoreRevealAttempts++
             var target = folderRestoreVisualTargetIndex
             var delegateReady = !!(grid && target >= 0 && grid.count > target
                                       && grid.currentIndex === target && grid.currentItem)
-            var posterReady = delegateReady
-                              && (typeof grid.currentItem.posterVisualReady === "undefined"
-                                  || grid.currentItem.posterVisualReady === true)
-            var gridStable = delegateReady
-                             && !folderPageInFlight
-                             && !loadingItems
-                             && !grid.moving
-                             && !grid.dragging
-                             && !grid.flicking
-                             && !(glideY && glideY.running)
-            var visuallyReady = posterReady && gridStable
+            // Ne dépend plus du décodage de l'affiche focalisée
+            // (posterVisualReady) : seule compte la mise en page (délégué posé,
+            // grille immobile). Voir GridRevealPolicy.js pour la décision produit.
+            var gridMoving = delegateReady && (folderPageInFlight
+                             || loadingItems
+                             || grid.moving
+                             || grid.dragging
+                             || grid.flicking
+                             || (glideY && glideY.running))
             var now = Date.now ? Date.now() : (new Date()).getTime()
 
-            // Le loader reste devant la grille tant que le poster focalisé n'est
-            // pas prêt et que la scène n'est pas restée stable pendant 1,1 s.
-            // Cette marge absorbe les petits flashs des posters voisins lors de
-            // leur création/décodage après une restauration au-delà de 220 items.
-            if (visuallyReady) {
-                if (folderRestoreStableSinceMs <= 0) folderRestoreStableSinceMs = now
-                if ((now - folderRestoreStableSinceMs) >= folderRestoreVisualSettleMs) {
-                    _releaseFolderRestoreVisualLoading("settled")
-                    return
-                }
-            } else {
-                folderRestoreStableSinceMs = 0
-            }
-
-            // Garde-fou de 4,8 s maximum après positionnement final.
-            if (folderRestoreRevealAttempts >= folderRestoreRevealMaxAttempts)
-                _releaseFolderRestoreVisualLoading("timeout-guard")
+            var result = GridReveal.tick({
+                delegateReady: delegateReady,
+                gridMoving: gridMoving,
+                stableSinceMs: folderRestoreStableSinceMs,
+                attempts: folderRestoreRevealAttempts
+            }, now)
+            folderRestoreStableSinceMs = result.stableSinceMs
+            folderRestoreRevealAttempts = result.attempts
+            if (result.release) _releaseFolderRestoreVisualLoading(result.reason)
         }
     }
 
