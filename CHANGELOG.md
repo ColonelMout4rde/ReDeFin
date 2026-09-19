@@ -9,9 +9,11 @@ effet sur le paquet installé.
 Les évolutions de ReDeFin lui-même sont décrites par Laborantine dans ses notes
 de version ; elles ne sont pas recopiées ici.
 
-Le numéro de version suit celui de la version officielle qui sert de base.
+Le numéro de version reprend celui de la version officielle qui sert de base,
+suivi du numéro de révision du fork : 0.9.7.1 est la première révision de
+ReDeFin-CM au-dessus de ReDeFin 0.9.7.
 
-## 0.9.7 — 19 septembre 2026
+## 0.9.7.1 — 20 septembre 2026
 
 Base : ReDeFin 0.9.7 officiel (paquet `ReDeFin_0.9.7_final`).
 Validé sur Freebox Révolution. Non testé sur Freebox Delta / Devialet.
@@ -210,5 +212,6 @@ Non testé sur Freebox Delta / Devialet. Le lecteur vidéo n'est pas concerné.
 - L'annonce de mise à jour au démarrage lit le fichier `updates/manifest.json`
   de ce fork et non plus celui du dépôt officiel. Elle ne propose donc jamais
   une version officielle, et n'ouvre plus la fiche Free Store de ReDeFin.
-- La version affichée dans « À propos » et transmise à Jellyfin est 0.9.7, en
-  accord avec le paquet (la version officielle 0.9.7 affiche encore 0.9.6).
+- La version affichée dans « À propos » et transmise à Jellyfin est 0.9.7.1, en
+  accord avec le paquet : la version officielle qui sert de base, puis la
+  révision du fork (la version officielle 0.9.7 affiche encore 0.9.6).

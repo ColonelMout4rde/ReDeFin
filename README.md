@@ -62,7 +62,7 @@ Rien n'est compilé : un paquet `.fbxqml` est une archive des sources QML/JS.
 
 ```bash
 ./check.sh                                    # lint, tests Node, Qt Quick et Python
-./build.sh -o build/ReDeFin-CM_0.9.7.fbxqml   # paquet à déposer sur le Free Factory
+./build.sh -o build/ReDeFin-CM_0.9.7.1.fbxqml   # paquet à déposer sur le Free Factory
 python3 tools/fbx-run.py -t <ip-du-player>    # lancement direct sur un Player en mode développeur
 ```
 
