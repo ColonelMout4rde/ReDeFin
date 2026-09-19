@@ -14,6 +14,7 @@ import "../js/UserStore.js" as UserStore
 import "../js/DevLog.js" as DevLog
 import "../js/GridRevealPolicy.js" as GridReveal
 import "../js/GridWindowCache.js" as GridWindowCache
+import "../js/GridFetchDispatch.js" as GridFetchDispatch
 Item {
     id: moviepage
     width: parent ? parent.width : 1920
@@ -1477,6 +1478,9 @@ Item {
     }
 
     // éviter un fetch trop tôt ou une réponse vide qui gagnerait la course côté MoviePage.
+    // Ne sert plus qu'à absorber une injection de contexte qui arrive après le
+    // tout premier départ (ex. playbackDeviceMode résolu après coup, voir
+    // GridFetchDispatch.js) : le tout premier départ, lui, ne l'attend plus.
     Timer {
         id: fetchDebounceTimer
         interval: 80
@@ -1484,11 +1488,43 @@ Item {
         onTriggered: fetchFolder()
     }
 
+    // GRID1→GRID2 mesuré à 190 ms (docs/audit-navigation/grilles.md) : ShellPage
+    // injecte accessToken/userId/serverUrl/folderId/libraryMode en plusieurs
+    // propriétés distinctes après Component.onCompleted (jamais toutes à la
+    // fois), et chacune relançait les 80 ms d'anti-rebond même une fois le
+    // contexte complet. GridFetchDispatch.js décide seul du comportement ;
+    // voir ce module pour le détail.
+    property bool _firstFetchDispatched: false
+    property bool _fetchDispatchPending: false
+
+    function _dispatchFetchNow() {
+        _fetchDispatchPending = false
+        _firstFetchDispatched = true
+        fetchFolder()
+    }
+
     function scheduleFetchFolder() {
         if (!ready) return
         _cancelFolderPageRequest("context_changed")
         _cancelWindowCacheRevalidate("context_changed")
-        fetchDebounceTimer.restart()
+
+        var action = GridFetchDispatch.nextAction({
+            contextComplete: !!(accessToken && userId && serverUrl && folderId),
+            firstDispatchDone: _firstFetchDispatched,
+            dispatchPending: _fetchDispatchPending
+        })
+        _fetchDispatchPending = action.dispatchPending
+
+        if (action.immediate) {
+            // Qt.callLater, jamais un appel synchrone : ShellPage peut encore
+            // être en train d'injecter d'autres propriétés (restoreIndex,
+            // restoreY...) dans le même appel ; le tour d'événement suivant
+            // les trouvera toutes posées.
+            fetchDebounceTimer.stop()
+            Qt.callLater(_dispatchFetchNow)
+            return
+        }
+        if (action.arm) fetchDebounceTimer.restart()
     }
 
     // bypassCache : utilisé uniquement par _revalidateWindowCache() quand la
