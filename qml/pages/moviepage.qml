@@ -2441,6 +2441,14 @@ Item {
         flow: GridView.FlowLeftToRight
         clip: true
         reuseItems: true
+        // La page pilote elle-même contentY (glideY, ensureVisible()) : le
+        // highlight par défaut de GridView (suivi de currentItem en 150 ms)
+        // écrirait contentY une seconde fois à chaque image, en concurrence
+        // avec glideY. Aucun composant highlight personnalisé n'est défini
+        // ici, donc le neutraliser ne change rien à l'affichage (même
+        // stratégie que SearchPage, cf. son ListView de résultats).
+        highlightFollowsCurrentItem: false
+        highlightMoveDuration: 0
         cacheBuffer: Math.round(height * 0.42)
         property int columns: Math.max(1, Math.floor(width / cellWidth))
         property int pendingEnsureIndex: -1
