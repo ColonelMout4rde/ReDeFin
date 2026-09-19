@@ -3115,6 +3115,7 @@ function negotiateAndApply(root,mp,router,subtitleItem,timers,startMs,forceHls,p
     var stickyManualRemux=!stickyManualDirectPlay&&_applyStickyManualRemux(root,ctx);
     if(!stickyManualDirectPlay&&!stickyManualRemux)_applyStickyManualQuality(root,ctx);
     ctx.playbackRuleMode=root.playbackRuleMode||"smart";
+    ctx.audioOutputMode=root.audioOutputMode||"multichannel";
     ctx.playbackRouterMode=root.playbackDeviceMode||"";
     ctx.playbackRouterBackend=root.playbackBackendMode||"";
     root.lastUiTargetMs=negotiated;

@@ -25,6 +25,7 @@
 .import "JellyfinPlaybackRevolution.js" as JFRevolution
 .import "JellyfinPlaybackDevialet.js" as JFDevialet
 .import "clientId.js" as ClientId
+.import "AudioOutputPolicy.js" as AudioOutput
 .import "DevLog.js" as DevLog
 var _MODE_AUTO       = "auto"
 var _MODE_CORE       = "core"
@@ -37,6 +38,7 @@ var _detectedMode = ""
 var _resolvedMode = _MODE_CORE
 var _lastBackendName = "core"
 var _playbackRuleMode = "smart"
+var _audioOutputMode = "multichannel"
 function _s(v) {
     return (v === undefined || v === null) ? "" : String(v)
 }
@@ -50,6 +52,20 @@ function setPlaybackRuleMode(mode) {
     return _playbackRuleMode
 }
 
+function _normalizeAudioOutputMode(value) {
+    try { return AudioOutput.normalizeMode(value) } catch(e0) {}
+    return "multichannel"
+}
+
+function setAudioOutputMode(mode) {
+    _audioOutputMode = _normalizeAudioOutputMode(mode)
+    return _audioOutputMode
+}
+
+function normalizeAudioOutputMode(value) {
+    return _normalizeAudioOutputMode(value);
+}
+
 // Façade dédiée à PlayerOverlay : garde la résolution des préférences et du
 // backend dans le routeur, sans déplacer la politique de codecs hors des backends.
 function normalizePlaybackRuleMode(value) {
@@ -60,6 +76,9 @@ function syncPlayerBackendContext(root) {
     var rule = _normalizePlaybackRuleMode(root.playbackRuleMode);
     try { if (root.playbackRuleMode !== rule) root.playbackRuleMode = rule; } catch(e0) {}
     setPlaybackRuleMode(rule);
+    var audioOut = _normalizeAudioOutputMode(root.audioOutputMode);
+    try { if (root.audioOutputMode !== audioOut) root.audioOutputMode = audioOut; } catch(e0b) {}
+    setAudioOutputMode(audioOut);
     var wanted = "";
     try { wanted = _s(root.playbackDeviceMode || ""); } catch(e1) {}
     if (!wanted) {
@@ -311,6 +330,10 @@ function negotiatePlayback(ctx, onSuccess, onError) {
             ctx.playbackRouterMode = _resolvedMode
             ctx.playbackRouterBackend = _lastBackendName
             ctx.playbackRuleMode = _playbackRuleMode || "smart"
+            // Le call-site (PlayerOverlay) est prioritaire : il porte la
+            // préférence de l'instance courante. L'état du routeur ne sert que
+            // de repli quand le contexte n'a pas été renseigné.
+            ctx.audioOutputMode = _normalizeAudioOutputMode(ctx.audioOutputMode || _audioOutputMode)
         } catch (e) {}
     }
 

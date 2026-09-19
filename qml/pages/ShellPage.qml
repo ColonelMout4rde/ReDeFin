@@ -2302,6 +2302,20 @@ FocusScope {
             } catch (e) {}
             return "smart"
         }
+        property string audioOutputMode: {
+            try {
+                return (Components.AppSettings && Components.AppSettings.audioOutputMode === "stereo")
+                        ? "stereo" : "multichannel"
+            } catch (e) {}
+            return "multichannel"
+        }
+        // Le panneau de réglages n'est accessible que depuis HomePage, donc hors
+        // lecture. Cette propagation à chaud reste un garde-fou : un changement
+        // est de toute façon appliqué à la PROCHAINE négociation.
+        onAudioOutputModeChanged: {
+            if (item && item.hasOwnProperty("audioOutputMode"))
+                item.audioOutputMode = audioOutputMode
+        }
 
         property var    playerPlaylist:       shell.playerPlaylist
         property string playerPlaylistTitle:  shell.playerPlaylistTitle
@@ -2341,6 +2355,7 @@ FocusScope {
             // Les handlers de contexte peuvent démarrer la négociation dès itemId.
             if (item.hasOwnProperty("playbackDeviceMode")) item.playbackDeviceMode = playbackDeviceMode
             if (item.hasOwnProperty("playbackRuleMode"))   item.playbackRuleMode   = playbackRuleMode
+            if (item.hasOwnProperty("audioOutputMode"))   item.audioOutputMode    = audioOutputMode
             if (item.hasOwnProperty("fbx"))         item.fbx         = fbx
             if (item.hasOwnProperty("shared"))      item.shared      = shell.shared
             if (item.hasOwnProperty("settingsRef")) item.settingsRef = shell.settings

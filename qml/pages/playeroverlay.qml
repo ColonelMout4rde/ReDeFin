@@ -236,6 +236,11 @@ FocusScope {
         return _normalizedPlaybackRuleMode(playbackRuleMode) !== "directplay"
     }
     function _syncPlaybackRuleMode(reason){ var m=_normalizedPlaybackRuleMode(playbackRuleMode); if(playbackRuleMode!==m)playbackRuleMode=m; JF.setPlaybackRuleMode(m) }
+    // Sortie audio utilisateur. "multichannel" conserve le comportement
+    // historique ; "stereo" fait mixer les pistes multicanales par le serveur.
+    property string audioOutputMode: "multichannel"
+    function _normalizedAudioOutputMode(value){ return JF.normalizeAudioOutputMode(value) }
+    function _syncAudioOutputMode(reason){ var m=_normalizedAudioOutputMode(audioOutputMode); if(audioOutputMode!==m)audioOutputMode=m; JF.setAudioOutputMode(m) }
     function _syncPlaybackBackend(reason){ JF.syncPlayerBackendContext(root) }
     function _sharedNavApi(){ try { return shared && shared.__redefinNavApi ? shared.__redefinNavApi : null } catch(e) { return null } }
     function _storeSensitiveNavContext(){
@@ -2896,6 +2901,7 @@ FocusScope {
     onFbxChanged:        { _syncPlaybackBackend("fbxChanged"); _syncNextOverlayContext() }
     onPlaybackDeviceModeChanged: _syncPlaybackBackend("playbackDeviceModeChanged")
     onPlaybackRuleModeChanged: _syncPlaybackRuleMode("playbackRuleModeChanged")
+    onAudioOutputModeChanged: _syncAudioOutputMode("audioOutputModeChanged")
     onAccessTokenChanged: {
         _resetServerPrerollState("accessToken")
         refreshStreams()
