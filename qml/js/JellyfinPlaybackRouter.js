@@ -25,6 +25,7 @@
 .import "JellyfinPlaybackRevolution.js" as JFRevolution
 .import "JellyfinPlaybackDevialet.js" as JFDevialet
 .import "clientId.js" as ClientId
+.import "DevLog.js" as DevLog
 var _MODE_AUTO       = "auto"
 var _MODE_CORE       = "core"
 var _MODE_REVOLUTION = "revolution"
@@ -1181,6 +1182,7 @@ function sendStartIfNeeded(root, bridge, positionMs) {
     if (root && root.serverPrerollBlocking === true) return;
     if (!root.scrobbleEnabled || root._startedReported && root._reportedSessionId === root.playSessionId) return;
     if (!root.serverUrl || !root.accessToken || !root.userId || !root.itemId || !root.playSessionId) return;
+    DevLog.log("T9", "POST Sessions/Playing session=" + root.playSessionId + " posMs=" + positionMs);
     bridge.sessionsPlayingStart(root.serverUrl, root.accessToken, _sessionPayload(root, false, positionMs), function(){}, function(){});
     root._startedReported = true;
     root._reportedSessionId = root.playSessionId;

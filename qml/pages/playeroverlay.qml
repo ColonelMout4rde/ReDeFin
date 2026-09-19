@@ -8,6 +8,7 @@ import "../components" as Components
 import "../js/JellyfinPlaybackRouter.js" as JF
 import "../js/jellyfinBridge.js"  as JFB
 import "../js/playerOverlayHelper.js" as H
+import "../js/DevLog.js" as DevLog
 import "../js/SkipIntro.js" as SkipIntro
 FocusScope {
     id: root
@@ -124,6 +125,7 @@ FocusScope {
         } catch(e) {}
     }
     function _armVideoLoading(reason){
+        DevLog.log("T8", "loader ARM reason=" + reason)
         videoLoadingGate = true
         _videoLoadingReason = String(reason || "")
         try { videoLoadingHideTimer.stop() } catch(e0) {}
@@ -131,6 +133,7 @@ FocusScope {
             videoLoadingShowTimer.restart()
     }
     function _releaseVideoLoading(reason){
+        DevLog.log("T8", "loader RELEASE reason=" + reason)
         videoLoadingGate = false
         _videoLoadingReason = ""
         if (!videoLoadingRequested) {
@@ -161,6 +164,9 @@ FocusScope {
     readonly property bool _reloadInProgress: H.reloadBlocksTransport(root)
     function _transportLocked(origin){
         if (!_reloadInProgress) return false
+        DevLog.log("T15", "transport ignore origin=" + origin +
+                    " sourceReset=" + _sourceResetActive +
+                    " gate=" + videoLoadingGate + " reason=" + _videoLoadingReason)
         // Le geste est refusé mais reste une activité utilisateur : le HUD
         // doit rester visible pour montrer le chargement en cours.
         resetControlsTimer()
@@ -1736,6 +1742,8 @@ FocusScope {
             }
         }
         onError: if (!_tearingDownPlayer && mp.error !== MediaPlayer.NoError){
+            DevLog.log("T7", "mpError error=" + mp.error + " " + mp.errorString +
+                        " status=" + mp.status + " sourceReset=" + _sourceResetActive)
             if (serverPrerollBlocking) {
                 if (_serverPrerollState === 2)
                     _finishServerPreroll("media-error")
@@ -1757,6 +1765,9 @@ FocusScope {
                 root._syncPlaybackSpeedToPlayer("source-changed", true)
         }
         onPlaybackStateChanged: {
+            DevLog.log("T10", "playbackState=" + mp.playbackState + " status=" + mp.status +
+                        " pos=" + mp.position + " gate=" + videoLoadingGate +
+                        " reason=" + _videoLoadingReason)
             if (_tearingDownPlayer) return
             if (serverPrerollBlocking) {
                 if (serverPrerollActive && mp.playbackState === MediaPlayer.PlayingState) {
@@ -1856,6 +1867,9 @@ FocusScope {
             }
         }
         onStatusChanged: {
+            DevLog.log("T10", "status=" + mp.status + " state=" + mp.playbackState +
+                        " pos=" + mp.position + " err=" + mp.error +
+                        " gate=" + videoLoadingGate + " reason=" + _videoLoadingReason)
             if (_tearingDownPlayer) return
 
             if (serverPrerollBlocking) {

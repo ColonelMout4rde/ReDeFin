@@ -19,6 +19,7 @@
 .import "SafeLog.js" as SafeLog
 .import "MediaCatalog.js" as MediaCatalog
 .import "DeferredReload.js" as DR
+.import "DevLog.js" as DevLog
 
 /* ===== Utils sûrs ===== */
 function _s(v) { return (v === undefined || v === null) ? "" : (v + ""); }
@@ -1563,6 +1564,9 @@ function restoreFocusAfterSettingsChoice(root, control, origin) {
     try { root.forceActiveFocus(); } catch(e0) {}
     try { root._updateControlsActive(); } catch(e1) {}
     try { root.resetControlsTimer(); } catch(e2) {}
+    DevLog.log("T16", "focus restaure control=" + control + " origin=" + origin +
+                " controlsFocus=" + root.controlsFocus + " menuIndex=" + root.menuIndex +
+                " controlsVisible=" + root.controlsVisible);
     return true;
 }
 /*
@@ -1584,6 +1588,7 @@ function reassertSettingsFocus(root, origin) {
     }
     try { root.forceActiveFocus(); } catch(e0) {}
     try { root._updateControlsActive(); } catch(e1) {}
+    DevLog.log("T16", "focus reaffirme control=" + control + " origin=" + origin);
     return true;
 }
 /* L'utilisateur a navigué ailleurs : plus rien à réaffirmer. */
@@ -1689,7 +1694,18 @@ function decideSettingChange(root, pick, active) {
     });
     if (root) root._deferredReloadState = out.state;
     _applyDeferredUiActions(root, out.actions);
-    return DR.firstActionType(out.actions);
+    var decision = DR.firstActionType(out.actions);
+    if (decision === "defer")
+        DevLog.log("T12", "choix differe kind=" + pick.kind +
+                    " value=" + DR.describeSelection(pick) +
+                    " actif=" + DR.describeSelection(active) +
+                    " enAttente=" + DR.pendingCount(deferredReloadState(root)));
+    else if (decision === "cancelPending" || decision === "noop")
+        DevLog.log("T13", "" + decision + " kind=" + (pick ? pick.kind : "?") +
+                    " value=" + DR.describeSelection(pick) +
+                    " actif=" + DR.describeSelection(active) +
+                    " enAttente=" + DR.pendingCount(deferredReloadState(root)));
+    return decision;
 }
 function decideQualityChoice(root, requested) {
     var pick = DR.qualitySelection(requested);
@@ -1703,13 +1719,20 @@ function cancelDeferredReload(root, kind, reason) {
     var out = DR.reduce(deferredReloadState(root), { type: "cancel", kind: kind });
     root._deferredReloadState = out.state;
     _applyDeferredUiActions(root, out.actions);
-    return DR.firstActionType(out.actions) === "cancelPending";
+    var cancelled = DR.firstActionType(out.actions) === "cancelPending";
+    if (cancelled)
+        DevLog.log("T13", "attente annulee kind=" + kind + " reason=" + reason +
+                    " enAttente=" + DR.pendingCount(deferredReloadState(root)));
+    return cancelled;
 }
 function resetDeferredReload(root, reason) {
     if (!root) return false;
+    var hadPending = DR.pendingCount(deferredReloadState(root));
     var out = DR.reduce(deferredReloadState(root), { type: "reset" });
     root._deferredReloadState = out.state;
     clearDeferredReloadUi(root);
+    if (hadPending > 0)
+        DevLog.log("T13", "attentes oubliees n=" + hadPending + " reason=" + reason);
     return true;
 }
 
@@ -1815,6 +1838,12 @@ function replayDeferredReload(root, mp, options) {
             picks = out.actions[i].picks || [];
     if (!picks.length) return false;
 
+    var rdfKinds = "";
+    for (var r = 0; r < picks.length; ++r)
+        rdfKinds += (r ? "," : "") + DR.describeSelection(picks[r].value);
+    DevLog.log("T14", "rejeu event=" + event + " reason=" + options.reason +
+                " forceResume=" + (options.forceResume === true) +
+                " targetUiMs=" + options.targetUiMs + " picks=[" + rdfKinds + "]");
     clearDeferredReloadUi(root);
     root._deferredReloadReplaying = true;
     root._forceResumeAfterDeferredReload = options.forceResume === true;
@@ -1835,6 +1864,11 @@ function replayDeferredReload(root, mp, options) {
                                    call.forceDPOnAudioSwitch, call.extra);
         } catch(eNegotiate) {}
     }
+    DevLog.log("T14", "rejeu emis=" + (!!call && root._internalDirectPlayReload !== true) +
+                " startMs=" + (call ? (target >= 0 ? target : call.startMs) : -1) +
+                " dpReload=" + (root._internalDirectPlayReload === true) +
+                " wasPlaying=" + root._trackSwitchWasPlaying +
+                " resumeWanted=" + root._resumeWantedAfterNegotiation);
     root._deferredReloadReplaying = false;
     root._forceResumeAfterDeferredReload = false;
     try { root._syncTrackMenuIndexes("deferred-reload-replay"); } catch(eSync) {}
@@ -1943,6 +1977,10 @@ function handleAudioPick(root, streamIdx, uiIdx, explicitManualDirectPlay, targe
         }
     }
 
+    DevLog.log("T1", "audioPick apply stream=" + streamIdx + " ui=" + uiIdx +
+                " serverPick=" + serverPick + " keepUiMs=" + k +
+                " paused=" + _deferredPauseActive(root) +
+                " selSub=" + root.selectedSubtitleStream + " useLocalSubs=" + root.useLocalSubs)
     var transaction = _audioSwitchTransactionExtra(root)
     root.audioIndex = uiIdx
     k = root._beginTrackSwitchRebase("audio", !serverPick)
@@ -2498,11 +2536,15 @@ function completeFreshDirectPlaySource(root, mp, timer, seekTimer, subtitleItem)
         releaseVideoLoadingWhenPaused(root, "fresh-directplay-ready-paused");
     }
 }
+var _devLogTick=0; // cadence des traces DevLog T6 (une sur dix)
 function tickSourceReset(root,mp,timer,seekTimer,subtitleItem){
     if(!root._sourceResetActive){timer.stop();return;} var now=_poNowMs(),mode=String(root._sourceResetMode||"server-timed");
     if(root._sourceResetPhase===1){
         var cleared=mp.playbackState===root._mpStoppedState&&mp.status===root._mpNoMedia;
         if(!cleared&&now-root._sourceResetStartedWallMs<root.sourceResetClearTimeoutMs)return;
+        DevLog.log("T5", "reset phase1->2 waitedMs=" + (now - root._sourceResetStartedWallMs) +
+                    " cleared=" + cleared + " mode=" + mode + " resume=" + root._sourceResetShouldResume +
+                    " url=" + DevLog.maskUrl(root._sourceResetPendingUrl));
         root._sourceResetPhase=2; root._sourceResetAssignedWallMs=now;
         root._pendingServerTimedBaseMs=-1; root._pendingHardResetBaseMs=-1;
         if(mode==="directplay-local"){
@@ -2516,6 +2558,10 @@ function tickSourceReset(root,mp,timer,seekTimer,subtitleItem){
     }
     if(root._sourceResetPhase!==2)return;
     var elapsed=now-root._sourceResetAssignedWallMs,ready=mp.status===root._mpBuffered||mp.status===root._mpLoaded;
+    if(DevLog.ENABLED&&(_devLogTick++ % 10)===0)
+        DevLog.log("T6", "reset phase2 elapsedMs=" + elapsed + " status=" + mp.status +
+                    " state=" + mp.playbackState + " pos=" + mp.position + " ready=" + ready +
+                    " err=" + mp.error + " " + mp.errorString);
     var local=Math.max(0,Math.floor(Number(mp.position||0))); if(ready&&root._sourceResetReadyWallMs<=0)root._sourceResetReadyWallMs=now;
     if(mode==="directplay-local"){
         if(ready&&(local>0||mp.playbackState===root._mpPlayingState)){
@@ -2531,11 +2577,18 @@ function tickSourceReset(root,mp,timer,seekTimer,subtitleItem){
         }
         return;
     }
-    if(ready&&(local>0||mp.playbackState===root._mpPlayingState)){root._commitFreshServerTimedSource("fresh-pipeline-progress");return;}
+    if(ready&&(local>0||mp.playbackState===root._mpPlayingState)){
+        DevLog.log("T6", "reset COMMIT elapsedMs=" + elapsed + " status=" + mp.status +
+                    " state=" + mp.playbackState + " pos=" + local +
+                    " resume=" + root._sourceResetShouldResume);
+        root._commitFreshServerTimedSource("fresh-pipeline-progress");return;}
     if(ready&&mp.playbackState===root._mpStoppedState&&elapsed>=root.sourceResetStartRetryMs&&root._sourceResetPlayRetries<1){
         root._sourceResetPlayRetries++;try{mp.play();}catch(e2){}return;
     }
-    if(elapsed>=root.sourceResetStartTimeoutMs)root._finishFreshServerTimedSourceTimeout("startup-timeout");
+    if(elapsed>=root.sourceResetStartTimeoutMs){
+        DevLog.log("T6", "reset TIMEOUT elapsedMs=" + elapsed + " status=" + mp.status +
+                    " state=" + mp.playbackState + " pos=" + local + " err=" + mp.error + " " + mp.errorString);
+        root._finishFreshServerTimedSourceTimeout("startup-timeout");}
 }
 /* ===== DirectPlay statique / remux de secours ===== */
 function isCurrentItemDirectPlaySeekUnsafe(root) {
@@ -3153,6 +3206,12 @@ function negotiateAndApply(root,mp,router,subtitleItem,timers,startMs,forceHls,p
             if(root.hasOwnProperty("_pendingAudioManualDirectPlay"))root._pendingAudioManualDirectPlay=false;
             root._pendingSubStream=root.snt;root._pendingSubIndex=-1;
             root._resumeWantedAfterNegotiation=false;
+            DevLog.log("T4", "apply serverTimed=" + root.serverTimedStream + " streamBase=" + streamBase +
+                        " pendingSeek=" + root._pendingSeekMs + " hardReset=" + hardReset +
+                        " trackSwitch=" + (extra.trackSwitchRebase === true) +
+                        " deferredReplay=" + (extra.deferredReplay === true) +
+                        " resume=" + resume + " session=" + root.playSessionId +
+                        " url=" + DevLog.maskUrl(nextUrl));
             try{root._syncTrackMenuIndexes("negotiation");}catch(e2){}
             mediaUrlSwap(root,mp,timers,subtitleItem,nextUrl,resume);
             if(extra.trackSwitchRebase===true&&typeof root._armTrackSwitchTimebaseSettle==="function")
