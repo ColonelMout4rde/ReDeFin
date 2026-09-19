@@ -529,7 +529,15 @@ FocusScope {
     onMenuIndexChanged: {
         var clamped = menuIndex < 1 ? 1 : (menuIndex > 2 ? 2 : menuIndex)
         if (clamped !== menuIndex) { menuIndex = clamped; return }
+        H.forgetSettingsFocusIfMoved(root)
     }
+    // Dernier bouton de réglages ayant reçu le focus après un choix. Il permet
+    // de réaffirmer ce focus une fois le rechargement terminé.
+    property int    _lastSettingsFocusControl: -1
+    function _restoreFocusAfterSettingsChoice(control, origin){
+        return H.restoreFocusAfterSettingsChoice(root, control, origin)
+    }
+    function _reassertSettingsFocus(origin){ return H.reassertSettingsFocus(root, origin) }
     readonly property int cF_PROGRESS: 0
     readonly property int cF_CONTROLS: 1
     readonly property int cF_MENU: 4
@@ -1045,7 +1053,10 @@ FocusScope {
     function _retrySeekRestoreWithJellyfinCopyRemux(targetUi, reason){
         H.retrySeekRestoreWithJellyfinCopyRemux(root, mp, _playbackTimers(), targetUi, reason)
     }
-    function _finishTrackSwitchRebase(reason){ H.finishTrackSwitchRebase(root, trackSwitchSettleTimer) }
+    function _finishTrackSwitchRebase(reason){
+        H.finishTrackSwitchRebase(root, trackSwitchSettleTimer)
+        _reassertSettingsFocus("track-switch-done")
+    }
     // Etat affiché dans Qualité vidéo. Le menu reflète le mode réellement obtenu.
     function _qualityOriginalDirectPlaySelected(){
         return JF.qualityOriginalDirectPlaySelected(root, mp)
@@ -1271,13 +1282,17 @@ FocusScope {
         })
     }
     function _cancelHardSourceReset(reason){ H.cancelHardSourceReset(root, sourceResetTimer) }
-    function _commitFreshServerTimedSource(reason){ H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item) }
+    function _commitFreshServerTimedSource(reason){
+        H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item)
+        _reassertSettingsFocus("fresh-source-commit")
+    }
     function _finishFreshServerTimedSourceTimeout(reason){
         H.completeFreshServerTimedSource(root, mp, sourceResetTimer, subsLoader.item)
         // Le reset dur a expiré sans progression : le comportement de sortie
         // reste celui du succès, mais la gate de chargement ne doit plus
         // pouvoir rester armée indéfiniment sur un pipeline qui ne démarre pas.
         _releaseVideoLoading("fresh-source-reset-timeout")
+        _reassertSettingsFocus("fresh-source-timeout")
     }
     function _beginHardSourceReset(u,shouldResume){ H.beginHardSourceReset(root,mp,sourceResetTimer,audioGateDelay,startupPlayTimer,subsLoader.item,u,shouldResume) }
     function _beginFreshDirectPlayReset(u,shouldResume,targetUi){
@@ -2382,6 +2397,7 @@ FocusScope {
         function onUserActivity(){ resetControlsTimer() }
     }
     onControlsFocusChanged: {
+        H.forgetSettingsFocusIfMoved(root)
         if (controlsLoader.item && controlsLoader.item.hasOwnProperty("focused")) {
             try { controlsLoader.item.focused = !skipIntroFocusClaimed && (controlsFocus===cF_PROGRESS) } catch(e) {}
         }
@@ -2389,8 +2405,11 @@ FocusScope {
         _syncControlsTimer()
         _focusControlsLater()
     }
-    onAudioMenuVisibleChanged: _syncControlsTimer()
-    onSubMenuVisibleChanged:   _syncControlsTimer()
+    // controlsLoader.active dépend aussi de ces deux booléens : sans
+    // resynchronisation ici, le halo des transports restait figé sur sa
+    // valeur précédente jusqu'au prochain changement de controlsFocus.
+    onAudioMenuVisibleChanged: { _syncControlsTimer(); _updateControlsActive() }
+    onSubMenuVisibleChanged:   { _syncControlsTimer(); _updateControlsActive() }
     onScrubActiveChanged:      _syncControlsTimer()
     onBaseOffsetMsChanged: {
         if (subsLoader.item)
@@ -2530,28 +2549,20 @@ FocusScope {
         ignoreUnknownSignals: true
         function onRequestQuality(bitrate){
             _applyQualityChoice(bitrate)
-            controlsFocus=cF_QUALITY
-            root.forceActiveFocus()
-            resetControlsTimer()
+            _restoreFocusAfterSettingsChoice(H.SETTINGS_CONTROL_QUALITY, "quality-choice")
         }
         function onRequestZoom(mode){
             _applyVideoZoomMode(mode)
-            controlsFocus=cF_ZOOM
-            root.forceActiveFocus()
-            resetControlsTimer()
+            _restoreFocusAfterSettingsChoice(H.SETTINGS_CONTROL_ZOOM, "zoom-choice")
         }
         function onRequestSpeed(rate){
             if (!root.isPureDirectPlay()) {
                 root._showSpeedDirectPlayOnlyPopup()
-                controlsFocus=cF_SPEED
-                root.forceActiveFocus()
-                resetControlsTimer()
+                _restoreFocusAfterSettingsChoice(H.SETTINGS_CONTROL_SPEED, "speed-refused")
                 return
             }
             _applyPlaybackSpeed(rate)
-            controlsFocus=cF_SPEED
-            root.forceActiveFocus()
-            resetControlsTimer()
+            _restoreFocusAfterSettingsChoice(H.SETTINGS_CONTROL_SPEED, "speed-choice")
         }
         function onRequestAudioPick(streamIdx, uiIdx){
             handleAudioPick(streamIdx, Math.max(0, uiIdx | 0))
@@ -2566,21 +2577,7 @@ FocusScope {
             handleSubsImage(streamIdx, uiIdx)
         }
         function onRequestTrackClose(control){
-            var w=settingsOverlayLoader.item
-            if(!w) return
-            if(control===w.controlSubtitle){
-                subMenuVisible=false
-                audioMenuVisible=false
-                controlsFocus=cF_MENU
-                menuIndex=2
-            } else {
-                audioMenuVisible=false
-                subMenuVisible=false
-                controlsFocus=cF_MENU
-                menuIndex=1
-            }
-            root.forceActiveFocus()
-            resetControlsTimer()
+            _restoreFocusAfterSettingsChoice(control, "track-close")
         }
         function onRequestFocusProgress(){
             _focusProgressBarSilent("settings")
@@ -2605,15 +2602,7 @@ FocusScope {
             resetControlsTimer()
         }
         function onRequestButtonFocus(control){
-            var w=settingsOverlayLoader.item
-            if(!w) return
-            if(control===w.controlZoom) controlsFocus=cF_ZOOM
-            else if(control===w.controlSpeed) controlsFocus=cF_SPEED
-            else if(control===w.controlAudio){ controlsFocus=cF_MENU; menuIndex=1 }
-            else if(control===w.controlSubtitle){ controlsFocus=cF_MENU; menuIndex=2 }
-            else controlsFocus=cF_QUALITY
-            root.forceActiveFocus()
-            resetControlsTimer()
+            _restoreFocusAfterSettingsChoice(control, "button-focus")
         }
         function onRequestFocusControlsLeft(){ if(controlsLoader.item&&controlsLoader.item.hasOwnProperty("focusIndex"))controlsLoader.item.focusIndex=1; _forceControlsFocusNow("settings-dpad") }
         function onRequestOpenControl(control){ var w=settingsOverlayLoader.item; if(!w)return; if(control===w.controlQuality)_openQualityPanel(); else if(control===w.controlZoom)_openZoomPanel(); else if(control===w.controlSpeed)_openSpeedPanel() }

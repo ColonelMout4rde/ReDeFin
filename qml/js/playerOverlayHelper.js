@@ -1466,6 +1466,107 @@ function handleQualityDirectPlay(root, mp) {
     })
     return true
 }
+/* ===== Focus des boutons de réglages du HUD ===== */
+/*
+ * Identifiants des boutons de réglages. Ils reprennent à l'identique la
+ * numérotation exposée par PlayerSettingsOverlay.qml ET PlayerControls.qml.
+ */
+var SETTINGS_CONTROL_QUALITY = 0;
+var SETTINGS_CONTROL_ZOOM = 1;
+var SETTINGS_CONTROL_SPEED = 2;
+var SETTINGS_CONTROL_AUDIO = 3;
+var SETTINGS_CONTROL_SUBTITLE = 4;
+
+function normalizeSettingsControl(control) {
+    var c = Math.floor(Number(control));
+    if (!isFinite(c) || isNaN(c) || c < 0 || c > SETTINGS_CONTROL_SUBTITLE)
+        return SETTINGS_CONTROL_QUALITY;
+    return c;
+}
+function settingsControlFocusTarget(root, control) {
+    control = normalizeSettingsControl(control);
+    if (control === SETTINGS_CONTROL_ZOOM) return root.cF_ZOOM;
+    if (control === SETTINGS_CONTROL_SPEED) return root.cF_SPEED;
+    if (control === SETTINGS_CONTROL_AUDIO || control === SETTINGS_CONTROL_SUBTITLE)
+        return root.cF_MENU;
+    return root.cF_QUALITY;
+}
+/* 0 = le bouton ne dépend pas de menuIndex. */
+function settingsControlMenuIndex(control) {
+    control = normalizeSettingsControl(control);
+    if (control === SETTINGS_CONTROL_AUDIO) return 1;
+    if (control === SETTINGS_CONTROL_SUBTITLE) return 2;
+    return 0;
+}
+function settingsFocusStillOnControl(root, control) {
+    if (!root || !(control >= 0) || control > SETTINGS_CONTROL_SUBTITLE) return false;
+    if (root.controlsFocus !== settingsControlFocusTarget(root, control)) return false;
+    var wanted = settingsControlMenuIndex(control);
+    return wanted > 0 ? root.menuIndex === wanted : true;
+}
+function _settingsPanelBusy(root) {
+    var names = ["_qualityPanelOpen", "_chaptersPanelOpen"];
+    for (var i = 0; i < names.length; ++i) {
+        try { if (typeof root[names[i]] === "function" && root[names[i]]() === true) return true; }
+        catch(e0) {}
+    }
+    return false;
+}
+/*
+ * Retour de focus déterministe après un choix ou une fermeture de menu : le
+ * focus revient TOUJOURS sur le bouton du HUD qui a ouvert le panneau, avec
+ * le HUD visible, quel que soit le chemin emprunté (validation, Retour,
+ * fermeture latérale) et que le réglage ait été appliqué, différé ou ignoré.
+ */
+function restoreFocusAfterSettingsChoice(root, control, origin) {
+    if (!root) return false;
+    control = normalizeSettingsControl(control);
+    // Remis en fin de fonction : les handlers de changement de controlsFocus /
+    // menuIndex ne doivent pas voir une cible incohérente pendant la bascule.
+    root._lastSettingsFocusControl = -1;
+    root.audioMenuVisible = false;
+    root.subMenuVisible = false;
+    var menuIndex = settingsControlMenuIndex(control);
+    if (menuIndex > 0) root.menuIndex = menuIndex;
+    root.controlsFocus = settingsControlFocusTarget(root, control);
+    root.controlsVisible = true;
+    root._lastSettingsFocusControl = control;
+    try { root.forceActiveFocus(); } catch(e0) {}
+    try { root._updateControlsActive(); } catch(e1) {}
+    try { root.resetControlsTimer(); } catch(e2) {}
+    return true;
+}
+/*
+ * Un rechargement peut détruire et reconstruire le chrome : on réaffirme le
+ * focus natif sur le bouton d'origine, tant que l'utilisateur n'a pas navigué
+ * ailleurs entre-temps.
+ */
+function reassertSettingsFocus(root, origin) {
+    if (!root) return false;
+    var control = root._lastSettingsFocusControl;
+    if (!(control >= 0)) return false;
+    if (root._tearingDownPlayer === true || root.nextUiLocked === true ||
+            root.serverPrerollBlocking === true) return false;
+    if (root.audioMenuVisible === true || root.subMenuVisible === true) return false;
+    if (_settingsPanelBusy(root)) return false;
+    if (root.controlsVisible !== true || !settingsFocusStillOnControl(root, control)) {
+        root._lastSettingsFocusControl = -1;
+        return false;
+    }
+    try { root.forceActiveFocus(); } catch(e0) {}
+    try { root._updateControlsActive(); } catch(e1) {}
+    return true;
+}
+/* L'utilisateur a navigué ailleurs : plus rien à réaffirmer. */
+function forgetSettingsFocusIfMoved(root) {
+    if (!root) return false;
+    var control = root._lastSettingsFocusControl;
+    if (!(control >= 0)) return false;
+    if (settingsFocusStillOnControl(root, control)) return false;
+    root._lastSettingsFocusControl = -1;
+    return true;
+}
+
 /* ===== Sélections de réglages appliquées (Audio / Sous-titres / Qualité) ===== */
 /*
  * Ces trois fonctions décrivent la ligne que le panneau de réglages affiche
