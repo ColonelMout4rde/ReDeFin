@@ -1525,6 +1525,18 @@ Item {
     property var _latestInitialPending: ({})
 
     property int _latestStageTarget: 0; property bool _latestInitialComplete: false; property bool _latestAllComplete: false; property bool latestFetchCompleted: false
+    // Constat 1 de l'audit accueil (mission « accueil » lot 3) : depuis que
+    // la porte de HomePage ne dépend plus de latestFetchCompleted, le
+    // premier reveal peut survenir AVANT que toutes les bibliothèques
+    // Latest aient répondu. `_homeRevealReady` ne suffit donc plus à
+    // distinguer « boot en cours, publier une seule fois » de « boot
+    // terminé, publier au fil de l'eau » : ce drapeau reste vrai une fois
+    // la première publication faite, quel que soit l'état du reveal
+    // ensuite (une restauration de focus peut le repasser à faux
+    // brièvement sans que ça change quoi que ce soit à la politique de
+    // publication Latest). Remis à faux à chaque nouvelle file initiale
+    // (_startLatestInitialQueue).
+    property bool _latestInitialPublishDone: false
     function _latestQueueDone(){ return _latestLibs && _latestPos >= _latestLibs.length && _latestInFlight <= 0; }
     Timer { id: latestPumpTimer; interval: postergrid.latestStartDelayMs; repeat: false; onTriggered: postergrid._pumpLatestInitial() }
     Timer { id: latestInitialWatchdog; interval: 500; repeat: true; running: postergrid._alive && postergrid._latestInFlight > 0; onTriggered: postergrid._sweepLatestInitialRequests() }
@@ -1607,6 +1619,7 @@ Item {
         postergrid._latestInitialComplete = false
         postergrid._latestAllComplete = false
         postergrid.latestFetchCompleted = false
+        postergrid._latestInitialPublishDone = false
         if (!postergrid.fetchedOnce || !postergrid.latestByFolder || postergrid.latestByFolder.length === 0) postergrid._setLatestByFolderIfChanged([])
         if (!_focusRestorePending && !_restoringFocus) {
             postergrid.latestIndicesByGroup = []
@@ -1649,18 +1662,24 @@ Item {
     function _rebuildLatestByFolderFromTemp() {
         postergrid._latestAllComplete = postergrid._latestQueueDone()
         postergrid.latestFetchCompleted = postergrid._latestAllComplete
-        // Constat 1 de l'audit accueil : avant que l'accueil ne soit révélé
-        // une première fois, chaque bibliothèque Latest reçue republiait
-        // latestByFolder, ce qui vide et régénère tout le Repeater
-        // (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6 fois pour
-        // 6 bibliothèques, alors que le rideau attend de toute façon la
-        // dernière. On ne publie donc qu'une fois toutes les réponses
-        // attendues arrivées (_latestAllComplete, y compris via le timeout
-        // existant qui force cet état dans forceHomeBootstrapCompletion).
-        // Une fois l'accueil déjà révélé une première fois (homeRevealReady),
-        // la publication incrémentale habituelle reprend : chargement par
-        // proximité en défilant, rechargement d'une section évincée.
-        if (postergrid._homeRevealReady || postergrid._latestAllComplete) {
+        // Constat 1 de l'audit accueil : chaque bibliothèque Latest reçue
+        // republiait latestByFolder, ce qui vide et régénère tout le
+        // Repeater (QQuickRepeater::setModel) à chaque réponse — jusqu'à 6
+        // fois pour 6 bibliothèques. Depuis la mission « accueil » lot 3, le
+        // rideau ne garantit plus que la dernière réponse Latest est déjà
+        // là avant le reveal (constat 2) : gater uniquement sur
+        // _homeRevealReady republierait donc une fois par bibliothèque
+        // pendant que l'utilisateur navigue déjà, ce qui est pire que le
+        // défaut d'origine. On ne publie donc qu'une fois TOUTES les
+        // réponses de la file initiale arrivées (_latestAllComplete, y
+        // compris via le timeout existant qui force cet état dans
+        // forceHomeBootstrapCompletion), et on retient ce premier succès
+        // dans _latestInitialPublishDone : toute complétion suivante
+        // (chargement par proximité en défilant, rechargement d'une
+        // section évincée) ne concerne plus qu'une poignée de bibliothèques
+        // et peut donc publier au fil de l'eau sans reproduire la rafale.
+        if (postergrid._latestInitialPublishDone || postergrid._latestAllComplete) {
+            postergrid._latestInitialPublishDone = true
             postergrid._publishLatestFromTemp()
         }
     }
