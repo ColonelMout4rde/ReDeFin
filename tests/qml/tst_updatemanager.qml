@@ -49,6 +49,8 @@ TestCase {
             { tag: "1.0 (implicite stable)", raw: "1.0", major: 1, minor: 0, patch: 0, beta: false, explicit: false },
             { tag: "1.2.3 (trois segments)", raw: "1.2.3", major: 1, minor: 2, patch: 3, beta: false, explicit: false },
             { tag: "2.0.true (stable numérique mais bêta explicite)", raw: "2.0.true", major: 2, minor: 0, patch: 0, beta: true, explicit: true },
+            { tag: "0.9.7.1 (révision de fork, quatre segments)", raw: "0.9.7.1", major: 0, minor: 9, patch: 7, revision: 1, beta: true, explicit: false },
+            { tag: "0.9.7.1.true (quatre segments + marqueur FreeStore)", raw: "0.9.7.1.true", major: 0, minor: 9, patch: 7, revision: 1, beta: true, explicit: true },
         ];
     }
 
@@ -59,6 +61,7 @@ TestCase {
         compare(parsed.major, data.major, "major: " + data.tag);
         compare(parsed.minor, data.minor, "minor: " + data.tag);
         compare(parsed.patch, data.patch, "patch: " + data.tag);
+        compare(parsed.revision, data.revision || 0, "revision: " + data.tag);
         compare(parsed.beta, data.beta, "beta: " + data.tag);
         compare(parsed.channelExplicit, data.explicit, "channelExplicit: " + data.tag);
     }
@@ -70,7 +73,7 @@ TestCase {
         compare(mgr._parseVersion(undefined), null);
         compare(mgr._parseVersion("abc"), null, "non numérique");
         compare(mgr._parseVersion("1"), null, "un seul segment, insuffisant");
-        compare(mgr._parseVersion("1.2.3.4"), null, "trop de segments");
+        compare(mgr._parseVersion("1.2.3.4.5"), null, "trop de segments");
         compare(mgr._parseVersion("1.2.x"), null, "segment non numérique");
         compare(mgr._parseVersion("1..2"), null, "segment vide");
         compare(mgr._parseVersion("-beta"), null, "que le marqueur, pas de numéro");
@@ -86,6 +89,21 @@ TestCase {
         verify(mgr._compareParsed(v10, v9) > 0, "0.10 doit être postérieure à 0.9");
         verify(mgr._compareParsed(v9, v10) < 0);
         compare(mgr._compareParsed(v9, v9), 0);
+    }
+
+    // Une révision de fork (« 0.9.7.1 ») se range après sa version de base et
+    // avant la version officielle suivante. Sans cela l'analyseur renvoyait
+    // null et la vérification de mise à jour s'arrêtait en silence.
+    function test_compareParsed_fourthComponentIsARevision() {
+        var mgr = newManager();
+        var base = mgr._parseVersion("0.9.7");
+        var rev1 = mgr._parseVersion("0.9.7.1");
+        var rev2 = mgr._parseVersion("0.9.7.2");
+        var next = mgr._parseVersion("0.9.8");
+        verify(mgr._compareParsed(rev1, base) > 0, "0.9.7.1 > 0.9.7");
+        verify(mgr._compareParsed(rev2, rev1) > 0, "0.9.7.2 > 0.9.7.1");
+        verify(mgr._compareParsed(next, rev2) > 0, "0.9.8 > 0.9.7.2");
+        compare(mgr._compareParsed(mgr._parseVersion("0.9.7.0"), base), 0, "0.9.7.0 == 0.9.7");
     }
 
     function test_compareParsed_stableBeatsBetaAtEqualNumber() {
