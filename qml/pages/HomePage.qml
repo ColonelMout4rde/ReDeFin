@@ -251,25 +251,37 @@ FocusScope {
                 try { if (!alreadyWarm && !shouldAskFetch && pg._dataEmpty && pg._dataEmpty()) shouldAskFetch = true } catch(e0) {}
                 _lastPosterGridApplyKey = key
 
-                if (alreadyWarm && !shouldAskFetch)
+                // Constat 11 de l'audit accueil : ce « if » sans accolades
+                // capturait le bloc suivant comme corps, ce qui le rend
+                // structurellement mort — alreadyWarm && !shouldAskFetch et
+                // shouldAskFetch ne peuvent jamais être vrais en même temps,
+                // donc le bloc « if (shouldAskFetch) » ci-dessous n'a jamais
+                // été atteint depuis HomePage. beginStaggeredFetch()/
+                // fetchHomeData() ne sont donc appelés QUE par
+                // postergrid.ensureBootFetch() (Component.onCompleted /
+                // onVisibleChanged de postergrid.qml), jamais depuis ici.
+                // Rendu explicite ci-dessous, SANS changer ce comportement
+                // (même code mort, juste visible) : un correctif éventuel de
+                // cette logique est laissé au coordinateur.
+                if (alreadyWarm && !shouldAskFetch) {
+                    if (shouldAskFetch) {
+                        var now = _nowMs()
+                        if (_posterFetchAskKey === key && (now - _posterFetchAskAtMs) < posterFetchAskCooldownMs) {
+                            return
+                        }
+                        if (pg._fetchInFlight === true) {
+                            return
+                        }
 
-                if (shouldAskFetch) {
-                    var now = _nowMs()
-                    if (_posterFetchAskKey === key && (now - _posterFetchAskAtMs) < posterFetchAskCooldownMs) {
-                        return
-                    }
-                    if (pg._fetchInFlight === true) {
-                        return
-                    }
+                        _posterFetchAskKey = key
+                        _posterFetchAskAtMs = now
 
-                    _posterFetchAskKey = key
-                    _posterFetchAskAtMs = now
-
-                    if (pg.beginStaggeredFetch && typeof pg.beginStaggeredFetch === "function") {
-                        pg.beginStaggeredFetch()
-                    } else if (pg.fetchHomeData && typeof pg.fetchHomeData === "function") {
-                        pg.fetchHomeData()
-                    } else {
+                        if (pg.beginStaggeredFetch && typeof pg.beginStaggeredFetch === "function") {
+                            pg.beginStaggeredFetch()
+                        } else if (pg.fetchHomeData && typeof pg.fetchHomeData === "function") {
+                            pg.fetchHomeData()
+                        } else {
+                        }
                     }
                 }
             }
