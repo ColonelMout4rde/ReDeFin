@@ -99,22 +99,6 @@ FocusScope {
     property var castPeople: []
     property int  castInitialLimit: 12
     property bool castExpanded: false
-    // Préchargement direct des portraits Cast depuis DetailMoviePage.
-    // Objectif: lancer les URLs portraits dès que fetchItem() donne People,
-    // donc bien avant que l'utilisateur descende jusqu'au bloc Distribution.
-    property bool castPortraitPrewarmEnabled: true
-    property int  castPortraitPrewarmCount: 6
-    property int  castPortraitPrewarmImmediateCount: 3
-    property int  castPortraitPrewarmDeferredCount: 3
-    property bool _castPortraitPrewarmSecondPhase: false
-    readonly property int castPortraitPrewarmW: 322
-    readonly property int castPortraitPrewarmH: 483
-    property var  castPortraitPrewarmPeople: []
-    property int  _castPortraitPrewarmEpoch: 0
-    function _clearCastPortraitPrewarm(){
-        castPortraitPrewarmPeople = []; _castPortraitPrewarmSecondPhase = false; _castPortraitPrewarmEpoch++
-        if (castPortraitPrewarmDeferredTimer.running) castPortraitPrewarmDeferredTimer.stop()
-    }
     property int  similarWarmCount: 14
     property bool similarExpanded: false
     property var  chipModel: []
@@ -123,7 +107,6 @@ FocusScope {
     function _resetData(clearError){
         item = null
         castPeopleAll = []; castPeople = []; castExpanded = false
-        _clearCastPortraitPrewarm()
         similarExpanded = false
         chipModel = []; genresLine = ""
         posterLogoFailed = false
@@ -137,44 +120,6 @@ FocusScope {
         castExpanded = castPeopleAll.length <= castInitialLimit
         castPeople = castExpanded ? castPeopleAll : castPeopleAll.slice(0, castInitialLimit)
     }
-    function _personPrimaryTagForPrewarm(p) {
-        if (!p) return ""
-        if (p.PrimaryImageTag) return String(p.PrimaryImageTag)
-        if (p.ImageTags && p.ImageTags.Primary) return String(p.ImageTags.Primary)
-        return ""
-    }
-
-    function castPortraitUrlForPrewarm(p) {
-        if (!castPortraitPrewarmEnabled || !p || !p.Id || !serverUrl) return ""
-        var tag = _personPrimaryTagForPrewarm(p)
-        if (!tag) return ""
-        // Même URL et mêmes dimensions que CastPage pour maximiser le partage du cache QML.
-        return Jellyfin.itemImageUrl(serverUrl, p.Id, "Primary", tag, {
-            format: "jpg",
-            quality: 82,
-            fillWidth: castPortraitPrewarmW,
-            fillHeight: castPortraitPrewarmH
-        })
-    }
-    function _refreshCastPortraitPrewarm() {
-        if (!castPortraitPrewarmEnabled || disposed || !visible || !serverUrl || !castPeopleAll || castPeopleAll.length <= 0) {
-            _clearCastPortraitPrewarm()
-            return
-        }
-        var cap = Math.min(Math.max(0, castPortraitPrewarmCount | 0), castPeopleAll.length)
-        var first = Math.min(Math.max(0, castPortraitPrewarmImmediateCount | 0), cap)
-        var deferred = Math.max(0, castPortraitPrewarmDeferredCount | 0)
-        var n = _castPortraitPrewarmSecondPhase ? Math.min(cap, first + deferred) : first
-        var arr = []
-        for (var i = 0; i < n; ++i) {
-            var p = castPeopleAll[i]
-            if (p && p.Id && _personPrimaryTagForPrewarm(p)) arr.push(p)
-        }
-        castPortraitPrewarmPeople = arr
-        _castPortraitPrewarmEpoch++
-        if (!_castPortraitPrewarmSecondPhase && cap > n && !disposed && visible && !castPortraitPrewarmDeferredTimer.running)
-            castPortraitPrewarmDeferredTimer.restart()
-    }
     function _hydrateCastNow(){
         if (castExpanded || !castPeopleAll || !castPeopleAll.length) return
         castExpanded = true; castPeople = castPeopleAll
@@ -184,7 +129,6 @@ FocusScope {
         }
     }
     onCastPeopleChanged: {
-        _refreshCastPortraitPrewarm()
         if (castPageLoader.item) try { castPageLoader.item.people = castPeople } catch(e) {}
         _updateExtendedSectionGates()
     }
@@ -719,45 +663,6 @@ FocusScope {
     }
     function _focusKey(){ return "detailMovie|" + _movieId() }
     signal requestPlay(string itemId, string accessToken, string userId, string serverUrl, string itemTitle)
-    // Pool root-level : précharge les portraits Cast même quand CastPage est encore hors écran.
-    // Le léger opacity évite certains builds Qt/Freebox qui retardent des Images totalement invisibles.
-    Timer {
-        id: castPortraitPrewarmDeferredTimer
-        interval: 1500
-        repeat: false
-        onTriggered: {
-            if (detailMoviePage.disposed || !detailMoviePage.visible) return
-            if (detailMoviePage.visualLoading) { restart(); return }
-            detailMoviePage._castPortraitPrewarmSecondPhase = true
-            detailMoviePage._refreshCastPortraitPrewarm()
-        }
-    }
-    Item {
-        id: castPortraitPrewarmPool
-        x: -4
-        y: -4
-        width: 1
-        height: 1
-        opacity: 0.01
-        visible: !detailMoviePage.disposed && detailMoviePage.visible && castPortraitPrewarmEnabled && castPortraitPrewarmPeople && castPortraitPrewarmPeople.length > 0
-        z: -10000
-        Repeater {
-            model: castPortraitPrewarmPeople ? castPortraitPrewarmPeople.length : 0
-            delegate: Image {
-                width: 1
-                height: 1
-                visible: true
-                asynchronous: true
-                cache: index < Math.min(detailMoviePage.castPortraitPrewarmImmediateCount, detailMoviePage.castPortraitPrewarmCount)
-                mipmap: false
-                smooth: false
-                fillMode: Image.PreserveAspectCrop
-                source: (!detailMoviePage.disposed && detailMoviePage.visible) ? detailMoviePage.castPortraitUrlForPrewarm(detailMoviePage.castPortraitPrewarmPeople[index]) : ""
-                sourceSize.width: detailMoviePage.castPortraitPrewarmW
-                sourceSize.height: detailMoviePage.castPortraitPrewarmH
-            }
-        }
-    }
     signal requestNavigation(string page)
     signal requestBackToMenu()
     Timer { id: saveFocusTimer; interval: 0; repeat: false; onTriggered: { _saveQueued = false; _saveFocusSnapshotNow() } }
@@ -1409,7 +1314,6 @@ FocusScope {
                 _warmDetailSnapshot = null
                 castPeopleAll = (res && res.People) ? res.People : []
                 _applyCastWarm()
-                _refreshCastPortraitPrewarm()
                 similarExpanded = false
                 recomputeChips()
                 serverResponseSlow = false
@@ -1571,8 +1475,6 @@ FocusScope {
                 _ctxChanged()
                 _queueFocusRepair("detailmovie-visible", 16)
             }
-            if (castPeopleAll && castPeopleAll.length > 0)
-                _refreshCastPortraitPrewarm()
         } else {
             // Page conservée en mémoire : lever le rideau PENDANT qu'elle est
             // cachée garantit qu'aucune frame obsolète ne puisse apparaître
@@ -1582,7 +1484,6 @@ FocusScope {
                 _armDetailReturnRefresh("hidden-for-player", true, "player")
             else if (returnScope === "person")
                 _armDetailReturnRefresh("hidden-for-person", false, "person")
-            _clearCastPortraitPrewarm()
         }
     }
     onSharedChanged: {
@@ -2762,7 +2663,7 @@ FocusScope {
                         height: (status === Loader.Ready && castPageLoader.item) ? (castPageLoader.item.implicitHeight || 0) : 0
                         onStatusChanged: _updateExtendedSectionGates()
                         onHeightChanged: _updateExtendedSectionGates()
-                        onLoaded: { wireCastLoader(); _refreshCastPortraitPrewarm(); _updateExtendedSectionGates() }
+                        onLoaded: { wireCastLoader(); _updateExtendedSectionGates() }
                     }
                     Loader {
                         id: chaptersLoader
