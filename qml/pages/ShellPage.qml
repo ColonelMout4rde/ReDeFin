@@ -2226,6 +2226,11 @@ FocusScope {
             active: pageLoadCurtain.visible && shell._circleDotsRuntimeEnabled
             running: active
             preservePhase: true
+            // F3 (audit shell) : le rideau global tourne pendant l'incubation
+            // asynchrone de la page suivante ; désactiver les Behavior et
+            // ralentir le pas laisse plus de temps CPU à cette incubation sur
+            // un cœur unique (Freebox Révolution).
+            lightweight: true
         }
 
         Text {
