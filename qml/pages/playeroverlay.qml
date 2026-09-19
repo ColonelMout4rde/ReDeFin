@@ -787,6 +787,28 @@ FocusScope {
     property bool _pendingAudioManualDirectPlay: false
     property int  _pendingSubStream:   snt
     property int  _pendingSubIndex:    -1
+    // ===== Rechargement différé des réglages choisis en pause =====
+    // Un choix audio / sous-titre serveur / qualité effectué pendant une pause
+    // n'ouvre AUCUN flux : il est mémorisé ici, l'UI le reflète immédiatement,
+    // et une seule négociation l'applique à la reprise. La décision pure vit
+    // dans qml/js/DeferredReload.js.
+    property var  _deferredReloadState: null
+    property int  _deferredAudioUiIndex: -1
+    property int  _deferredSubtitleUiIndex: -1
+    property int  _deferredQualityValue: 0
+    property bool _deferredReloadReplaying: false
+    property bool _forceResumeAfterDeferredReload: false
+    property bool _coalescedNegotiationActive: false
+    property var  _coalescedNegotiationCall: null
+    readonly property bool deferredReloadPending:
+        _deferredAudioUiIndex >= 0 || _deferredSubtitleUiIndex >= 0 || _deferredQualityValue !== 0
+    // Une pause réelle, hors téléchargement de source, hors scrub et hors
+    // pré-roll : seul contexte dans lequel un réglage doit être différé.
+    function _deferredReloadPauseActive(){
+        return !_tearingDownPlayer && !serverPrerollBlocking && !_sourceResetActive &&
+               !scrubActive && mp.playbackState === MediaPlayer.PausedState
+    }
+    function _resetDeferredReload(reason){ return H.resetDeferredReload(root, reason) }
     property int _autoLocalizeSubStream: -1
     property int resumePrerollMs: 1500
     property bool   scrobbleEnabled: true
@@ -875,14 +897,28 @@ FocusScope {
         return idx < 0 ? Math.max(0, Math.min(subtitleIndex|0, count-1))
                        : Math.max(0, Math.min(idx|0, count-1))
     }
+    // Index réellement affichés par les menus : une attente de rechargement
+    // prend le pas sur l'état appliqué, afin que la coche suive immédiatement
+    // le choix de l'utilisateur alors qu'aucun flux n'a encore été ouvert.
+    function _displayAudioUiIndexForSettings(){
+        return _deferredAudioUiIndex >= 0 ? _deferredAudioUiIndex
+                                          : _effectiveAudioUiIndexForSettings()
+    }
+    function _displaySubtitleUiIndexForSettings(){
+        return _deferredSubtitleUiIndex >= 0 ? _deferredSubtitleUiIndex
+                                             : _effectiveSubtitleUiIndexForSettings()
+    }
+    function _deferredSelectionNote(pending){
+        return pending ? "Appliqué à la reprise" : ""
+    }
     function _syncTrackMenuIndexes(reason){
         // Les index Audio sont alignés sur les vraies pistes. Les sous-titres
         // conservent seuls l'index synthétique 0 pour « Aucun ».
         H.syncTrackMenuIndexes(root, null, null)
         var w=_settingsOverlay()
         if(w && w.syncTrackIndexes)
-            w.syncTrackIndexes(_effectiveAudioUiIndexForSettings(),
-                               _effectiveSubtitleUiIndexForSettings())
+            w.syncTrackIndexes(_displayAudioUiIndexForSettings(),
+                               _displaySubtitleUiIndexForSettings())
     }
     function _applyOriginalDirectPlayFromQuality(){
         manualQualityBitrate = 0
@@ -978,6 +1014,7 @@ FocusScope {
         if (!wasServerPreroll)
             _rememberPersistablePositionMs(_finalExitPositionMs, reason || "exit")
         _playbackExitInProgress = true
+        _resetDeferredReload("player-exit")
         try { scrubCommitTimer.stop() } catch(e0) {}
         _cancelCoalescedLocalSeek()
         try { resumeCheckpointTimer.stop() } catch(e1) {}
@@ -1034,12 +1071,33 @@ FocusScope {
         if (manualQualityBitrate > 0) return manualQualityBitrate
         return -3
     }
+    // Qualité vidéo réellement affichée par le panneau : une attente prend le
+    // pas sur l'état appliqué.
+    function _displayQualityBitrate(){
+        return _deferredQualityValue > 0 ? _deferredQualityValue : manualQualityBitrate
+    }
+    function _displayQualityDirectPlaySelected(){
+        return _deferredQualityValue !== 0 ? _deferredQualityValue === -1
+                                           : _qualityOriginalDirectPlaySelected()
+    }
+    function _displayQualityRemuxSelected(){
+        return _deferredQualityValue !== 0 ? _deferredQualityValue === -2
+                                           : _qualityRemuxSelected()
+    }
+    function _displayQualityAutomaticSelected(){
+        return _deferredQualityValue !== 0 ? _deferredQualityValue === -3
+                                           : _qualityAutomaticServerSelected()
+    }
+    function _displayQualityStatusText(){
+        return _deferredQualityValue !== 0 ? "Appliqué à la reprise de la lecture"
+                                           : _qualityStatusText()
+    }
     // Point d'entrée unique du panneau Qualité vidéo : une seule place décide
     // d'ignorer, de différer ou d'appliquer un choix de qualité.
     function _applyQualityChoice(requested){
         requested = Math.floor(Number(requested || 0))
         if (requested === 0) return false
-        if (H.decideQualityChoice(root, requested) === "noop") return true
+        if (H.decideQualityChoice(root, requested) !== "applyNow") return true
         if (requested === -3) return _applyAutomaticQualityFromQuality()
         if (requested === -2) return _applyManualRemuxFromQuality()
         if (requested === -1) return _applyOriginalDirectPlayFromQuality()
@@ -1415,6 +1473,11 @@ FocusScope {
             showScrubPreview(_pendingSeekMs)
             return
         }
+        // Un réglage différé embarque dans la négociation du seek : une seule
+        // négociation, à la position finale, et la pause reste conservée si le
+        // scrub a été lancé depuis une pause.
+        if (H.seekDeferredReload(root, mp, target, "commitScrub", _wasPlayingBeforeSwitch))
+            return
         if (shouldNetworkSeek()){
             _resumeWantedAfterNegotiation = _wasPlayingBeforeSwitch
             _serverSeekFallback(target, "commitScrub")
@@ -1792,6 +1855,7 @@ FocusScope {
             if (_pendingSeekMs>=0 && (mp.status===MediaPlayer.Buffered || mp.status===MediaPlayer.Loaded)) seekRestoreTimer.start()
             if (mp.status===MediaPlayer.EndOfMedia){
                 _releaseVideoLoading("end-of-media")
+                _resetDeferredReload("end-of-media")
                 var endPos = durationMs() > 0 ? durationMs() : _capturePersistablePositionMs("end-of-media")
                 _rememberPersistablePositionMs(endPos, "end-of-media")
                 JF.sendStoppedAtPosition(root, JFB, endPos, function(){})
@@ -2119,6 +2183,13 @@ FocusScope {
         var willPause = (mp.playbackState === MediaPlayer.PlayingState)
         resetControlsTimer()
         _cancelStartupPlay(origin || "manual-toggle")
+        // Voie de reprise unique du lecteur : toutes les commandes Play
+        // (bouton HUD, OK sur la progressbar, touche média, mediaToggle)
+        // convergent ici. Des réglages choisis pendant la pause sont appliqués
+        // en une seule négociation, avec reprise forcée ; aucun mp.play() ne
+        // doit alors être émis sur l'ancien flux.
+        if (!willPause && H.resumeDeferredReload(root, mp, origin || "manual-toggle"))
+            return
         try {
             if (willPause) { mp.pause() }
             else { mp.play() }
@@ -2418,22 +2489,22 @@ FocusScope {
             })
             item.chaptersPanelOpen = Qt.binding(function(){ return root._chaptersPanelOpen() })
             item.safeBottomMargin = Qt.binding(function(){ return root.sideButtonBottomMargin })
-            item.selectedBitrate = Qt.binding(function(){ return root.manualQualityBitrate })
+            item.selectedBitrate = Qt.binding(function(){ return root._displayQualityBitrate() })
             item.sourceVideoBitrate = Qt.binding(function(){ return root.sourceVideoBitrate })
             item.directPlaySelected = Qt.binding(function(){
-                return root._qualityOriginalDirectPlaySelected()
+                return root._displayQualityDirectPlaySelected()
             })
             item.remuxSelected = Qt.binding(function(){
-                return root._qualityRemuxSelected()
+                return root._displayQualityRemuxSelected()
             })
             item.automaticServerSelected = Qt.binding(function(){
-                return root._qualityAutomaticServerSelected()
+                return root._displayQualityAutomaticSelected()
             })
             item.automaticQualityLabel = Qt.binding(function(){
                 return root._qualityAutomaticServerLabel()
             })
             item.qualityStatusText = Qt.binding(function(){
-                return root._qualityStatusText()
+                return root._displayQualityStatusText()
             })
             item.selectedMode = Qt.binding(function(){ return root.videoZoomMode })
             item.selectedRate = Qt.binding(function(){ return root.playbackSpeed })
@@ -2442,14 +2513,16 @@ FocusScope {
             item.subtitleMenuOpen = Qt.binding(function(){ return root.subMenuVisible })
             item.audioTracks = Qt.binding(function(){ return root.audioTracks })
             item.audioStreamIndexMap = Qt.binding(function(){ return root.audioStreamIndexMap })
-            item.audioCurrentIndex = Qt.binding(function(){ return root._effectiveAudioUiIndexForSettings() })
+            item.audioCurrentIndex = Qt.binding(function(){ return root._displayAudioUiIndexForSettings() })
+            item.audioSelectionNote = Qt.binding(function(){ return root._deferredSelectionNote(root._deferredAudioUiIndex >= 0) })
             item.subtitleTracks = Qt.binding(function(){ return root.subtitleTracks })
             item.subtitleStreamIndexMap = Qt.binding(function(){ return root.subtitleStreamIndexMap })
             item.subtitleIsTextMap = Qt.binding(function(){ return root.subtitleIsTextMap })
-            item.subtitleCurrentIndex = Qt.binding(function(){ return root._effectiveSubtitleUiIndexForSettings() })
+            item.subtitleCurrentIndex = Qt.binding(function(){ return root._displaySubtitleUiIndexForSettings() })
+            item.subtitleSelectionNote = Qt.binding(function(){ return root._deferredSelectionNote(root._deferredSubtitleUiIndex >= 0) })
             if (item.syncTrackIndexes)
-                item.syncTrackIndexes(root._effectiveAudioUiIndexForSettings(),
-                                      root._effectiveSubtitleUiIndexForSettings())
+                item.syncTrackIndexes(root._displayAudioUiIndexForSettings(),
+                                      root._displaySubtitleUiIndexForSettings())
         }
     }
     Connections {
@@ -2624,8 +2697,8 @@ FocusScope {
         controlsVisible=true; controlsTimer.stop()
         var w=_settingsOverlay()
         if(w && w.syncTrackIndexes)
-            w.syncTrackIndexes(_effectiveAudioUiIndexForSettings(),
-                               _effectiveSubtitleUiIndexForSettings())
+            w.syncTrackIndexes(_displayAudioUiIndexForSettings(),
+                               _displaySubtitleUiIndexForSettings())
         if(w && w.focusCurrentTrack) Qt.callLater(function(){ if(audioMenuVisible) w.focusCurrentTrack() })
     }
     function openSubMenu(){
@@ -2636,8 +2709,8 @@ FocusScope {
         controlsVisible=true; controlsTimer.stop()
         var w=_settingsOverlay()
         if(w && w.syncTrackIndexes)
-            w.syncTrackIndexes(_effectiveAudioUiIndexForSettings(),
-                               _effectiveSubtitleUiIndexForSettings())
+            w.syncTrackIndexes(_displayAudioUiIndexForSettings(),
+                               _displaySubtitleUiIndexForSettings())
         if(w && w.focusCurrentTrack) Qt.callLater(function(){ if(subMenuVisible) w.focusCurrentTrack() })
     }
     Keys.onPressed: {
@@ -2755,6 +2828,7 @@ FocusScope {
         _lastPersistableUiMs = 0
     }
     Component.onCompleted: {
+        _resetDeferredReload("completed")
         _primaryUiReady = false
         _secondaryUiReady = false
         primaryUiTimer.restart()
@@ -2871,6 +2945,7 @@ FocusScope {
         if (!_plHasContent()) _ensureAutoEpisodePlaylist()
         _cancelHardSourceReset("item-changed")
         _resetCommonPlaybackRuntimeState(true)
+        _resetDeferredReload("item-changed")
         _pendingAudioStream = snt
         _pendingAudioIndex = -1
         _pendingAudioManualDirectPlay = false
@@ -2962,6 +3037,11 @@ FocusScope {
         _directPlayOpenStartedWallMs = 0
         _gateArmed = false
         _resumeAfterGate = false
+        _deferredReloadReplaying = false
+        _forceResumeAfterDeferredReload = false
+        _coalescedNegotiationActive = false
+        _coalescedNegotiationCall = null
+        _resetDeferredReload("destruction")
         _mediaErrorRecoveryArmed = false
         _mediaErrorRecoveryInProgress = false
         _frozenPlaybackWatchActive = false

@@ -1497,18 +1497,227 @@ function currentQualitySelection(root) {
     try { value = root._activeQualityChoiceValue(); } catch(e0) { value = DR.QUALITY_AUTO; }
     return DR.qualitySelection(value);
 }
+/* ===== Rechargement différé des réglages choisis en pause ===== */
+/*
+ * Comme le client officiel Jellyfin Android TV, un réglage modifié pendant une
+ * pause ne relance pas la lecture : le choix est mémorisé, l'UI le reflète
+ * immédiatement, et la négociation n'a lieu qu'à la reprise. La décision pure
+ * vit dans DeferredReload.js ; ici on ne fait que la brancher sur PlayerOverlay
+ * et entretenir les surcharges d'affichage.
+ */
+function deferredReloadState(root) {
+    if (!root) return DR.createState();
+    if (!root._deferredReloadState) root._deferredReloadState = DR.createState();
+    return root._deferredReloadState;
+}
+function deferredReloadPendingCount(root) {
+    return DR.pendingCount(deferredReloadState(root));
+}
+function _deferredPauseActive(root) {
+    if (!root || root._deferredReloadReplaying === true) return false;
+    if (typeof root._deferredReloadPauseActive !== "function") return false;
+    try { return root._deferredReloadPauseActive() === true; } catch(e0) { return false; }
+}
+function clearDeferredReloadUi(root) {
+    if (!root) return false;
+    root._deferredAudioUiIndex = -1;
+    root._deferredSubtitleUiIndex = -1;
+    root._deferredQualityValue = DR.QUALITY_NONE;
+    try { root._syncTrackMenuIndexes("deferred-reload-ui-clear"); } catch(e0) {}
+    return true;
+}
+function _applyDeferredUiActions(root, actions) {
+    if (!root || !actions) return;
+    for (var i = 0; i < actions.length; ++i) {
+        var a = actions[i];
+        if (!a) continue;
+        if (a.type === "defer") {
+            if (a.kind === DR.KIND_AUDIO) root._deferredAudioUiIndex = a.value.uiIndex;
+            else if (a.kind === DR.KIND_SUBTITLE) root._deferredSubtitleUiIndex = a.value.uiIndex;
+            else if (a.kind === DR.KIND_QUALITY) root._deferredQualityValue = a.value.value;
+        } else if (a.type === "cancelPending") {
+            if (a.kind === DR.KIND_AUDIO) root._deferredAudioUiIndex = -1;
+            else if (a.kind === DR.KIND_SUBTITLE) root._deferredSubtitleUiIndex = -1;
+            else if (a.kind === DR.KIND_QUALITY) root._deferredQualityValue = DR.QUALITY_NONE;
+        }
+    }
+    try { root._syncTrackMenuIndexes("deferred-reload-ui"); } catch(e0) {}
+}
 /*
  * Décision d'application d'un réglage choisi par l'utilisateur.
- * Renvoie "applyNow" ou "noop".
+ * Renvoie "applyNow", "noop", "defer" ou "cancelPending".
+ * Seul "applyNow" autorise un appel réseau et une modification d'état.
  */
 function decideSettingChange(root, pick, active) {
-    if (DR.sameSelection(pick, active)) return "noop";
-    return "applyNow";
+    if (root && root._deferredReloadReplaying === true) return "applyNow";
+    var out = DR.reduce(deferredReloadState(root), {
+        type: "pick",
+        kind: pick ? pick.kind : "",
+        value: pick,
+        active: active,
+        paused: _deferredPauseActive(root)
+    });
+    if (root) root._deferredReloadState = out.state;
+    _applyDeferredUiActions(root, out.actions);
+    return DR.firstActionType(out.actions);
 }
 function decideQualityChoice(root, requested) {
     var pick = DR.qualitySelection(requested);
     if (pick.value === DR.QUALITY_NONE) return "noop";
     return decideSettingChange(root, pick, currentQualitySelection(root));
+}
+/* Un réglage appliqué instantanément (sous-titre texte local en DirectPlay)
+ * rend caduque une attente du même genre. */
+function cancelDeferredReload(root, kind, reason) {
+    if (!root) return false;
+    var out = DR.reduce(deferredReloadState(root), { type: "cancel", kind: kind });
+    root._deferredReloadState = out.state;
+    _applyDeferredUiActions(root, out.actions);
+    return DR.firstActionType(out.actions) === "cancelPending";
+}
+function resetDeferredReload(root, reason) {
+    if (!root) return false;
+    var out = DR.reduce(deferredReloadState(root), { type: "reset" });
+    root._deferredReloadState = out.state;
+    clearDeferredReloadUi(root);
+    return true;
+}
+
+/* ===== Coalescence des négociations rejouées ===== */
+/*
+ * Le rejeu doit produire UNE SEULE négociation, même si l'audio, les
+ * sous-titres et la qualité sont tous en attente. Plutôt que de dupliquer la
+ * logique des handlers, on les rejoue tels quels et on intercepte leurs appels
+ * à negotiatePlayback() : les arguments sont fusionnés, puis un seul appel
+ * réel est émis à la fin.
+ *
+ * Ordre de rejeu : audio, puis sous-titres, puis qualité. Les scalaires du
+ * dernier appel gagnent, car la qualité décide du pipeline. La première
+ * transaction de rollback rencontrée (audioSwitchTransaction + champs
+ * previous*) est en revanche préservée : elle seule décrit l'état réellement
+ * antérieur à toute la série.
+ */
+function mergeCoalescedNegotiationCall(previous, next) {
+    if (!previous) return next;
+    if (!next) return previous;
+    var merged = {
+        startMs: next.startMs,
+        forceHls: next.forceHls === true,
+        preferTicks: next.preferTicks === true,
+        forceMp4: next.forceMp4 === true,
+        forceDPOnAudioSwitch: next.forceDPOnAudioSwitch === true,
+        extra: {}
+    };
+    var prevExtra = previous.extra || {};
+    var nextExtra = next.extra || {};
+    var keepTransaction = prevExtra.audioSwitchTransaction === true;
+    var k;
+    for (k in prevExtra)
+        if (Object.prototype.hasOwnProperty.call(prevExtra, k)) merged.extra[k] = prevExtra[k];
+    for (k in nextExtra) {
+        if (!Object.prototype.hasOwnProperty.call(nextExtra, k)) continue;
+        if (keepTransaction && (k === "audioSwitchTransaction" || k.indexOf("previous") === 0))
+            continue;
+        merged.extra[k] = nextExtra[k];
+    }
+    return merged;
+}
+/*
+ * Point d'interception unique : tant qu'un rejeu est en cours, aucun appel
+ * n'atteint le routeur. negotiateAndApply() appelle cette fonction en premier.
+ */
+function coalesceNegotiationIfActive(root, startMs, forceHls, preferTicks,
+                                     forceMp4, forceDPOnAudioSwitch, extra) {
+    if (!root || root._coalescedNegotiationActive !== true) return false;
+    root._coalescedNegotiationCall = mergeCoalescedNegotiationCall(root._coalescedNegotiationCall, {
+        startMs: Math.max(0, Math.floor(_numberOr(startMs, 0))),
+        forceHls: forceHls === true,
+        preferTicks: preferTicks === true,
+        forceMp4: forceMp4 === true,
+        forceDPOnAudioSwitch: forceDPOnAudioSwitch === true,
+        extra: extra || {}
+    });
+    return true;
+}
+function beginCoalescedNegotiation(root) {
+    root._coalescedNegotiationActive = true;
+    root._coalescedNegotiationCall = null;
+}
+function endCoalescedNegotiation(root) {
+    root._coalescedNegotiationActive = false;
+    var call = root._coalescedNegotiationCall || null;
+    root._coalescedNegotiationCall = null;
+    return call;
+}
+function _replayOneDeferredPick(root, pick) {
+    if (!pick || !pick.value) return;
+    if (pick.kind === DR.KIND_AUDIO) {
+        handleAudioPick(root, pick.value.stream, pick.value.uiIndex,
+                        pick.value.manualDirectPlay === true);
+        return;
+    }
+    if (pick.kind === DR.KIND_SUBTITLE) {
+        // Le routage texte local / serveur a déjà été tranché au moment du
+        // choix : le pipeline n'a pas bougé pendant la pause.
+        switchServerSubtitleStable(root, "deferred-subtitle",
+                                   pick.value.stream, pick.value.uiIndex);
+        return;
+    }
+    if (pick.kind === DR.KIND_QUALITY) {
+        try { root._applyQualityChoice(pick.value.value); } catch(e0) {}
+    }
+}
+/*
+ * Applique toutes les attentes en une seule négociation.
+ *   options.event      : "resume" (reprise) ou "seek" (renégociation de seek)
+ *   options.forceResume: la négociation doit se terminer en lecture
+ *   options.targetUiMs : position cible imposée (seek), -1 sinon
+ */
+function replayDeferredReload(root, mp, options) {
+    if (!root || !mp || root._tearingDownPlayer) return false;
+    options = options || {};
+    var event = options.event === "seek" ? "seek" : "resume";
+    var out = DR.reduce(deferredReloadState(root), { type: event });
+    root._deferredReloadState = out.state;
+    var picks = [];
+    for (var i = 0; i < out.actions.length; ++i)
+        if (out.actions[i] && out.actions[i].type === "replayOnResume")
+            picks = out.actions[i].picks || [];
+    if (!picks.length) return false;
+
+    clearDeferredReloadUi(root);
+    root._deferredReloadReplaying = true;
+    root._forceResumeAfterDeferredReload = options.forceResume === true;
+    beginCoalescedNegotiation(root);
+    try {
+        for (var j = 0; j < picks.length; ++j) _replayOneDeferredPick(root, picks[j]);
+    } catch(eReplay) {}
+    var call = endCoalescedNegotiation(root);
+    var target = Math.floor(_numberOr(options.targetUiMs, -1));
+    // handleQualityDirectPlay() peut demander la recréation complète de
+    // PlayerOverlay : plus rien ne doit être négocié sur l'instance mourante.
+    if (call && root._internalDirectPlayReload !== true) {
+        if (target >= 0) _retargetQueuedAudioSwitch(root, target, options.forceResume === true);
+        call.extra = _mergeExtra(call.extra, { deferredReplay: true });
+        try {
+            root.negotiatePlayback(target >= 0 ? target : call.startMs,
+                                   call.forceHls, call.preferTicks, call.forceMp4,
+                                   call.forceDPOnAudioSwitch, call.extra);
+        } catch(eNegotiate) {}
+    }
+    root._deferredReloadReplaying = false;
+    root._forceResumeAfterDeferredReload = false;
+    try { root._syncTrackMenuIndexes("deferred-reload-replay"); } catch(eSync) {}
+    return true;
+}
+function resumeDeferredReload(root, mp, reason) {
+    return replayDeferredReload(root, mp,
+        { event: "resume", forceResume: true, targetUiMs: -1, reason: reason });
+}
+function seekDeferredReload(root, mp, targetUiMs, reason, forceResume) {
+    return replayDeferredReload(root, mp,
+        { event: "seek", forceResume: forceResume === true,
+          targetUiMs: targetUiMs, reason: reason });
 }
 function _audioSwitchTransactionExtra(root) {
     return {
@@ -1597,7 +1806,7 @@ function handleAudioPick(root, streamIdx, uiIdx, explicitManualDirectPlay, targe
     if (targetUiOverride === undefined || targetUiOverride === null) {
         var pick = DR.audioSelection(serverPick ? streamIdx : -1, uiIdx,
                                      explicitManualDirectPlay === true)
-        if (decideSettingChange(root, pick, currentAudioSelection(root)) === "noop") {
+        if (decideSettingChange(root, pick, currentAudioSelection(root)) !== "applyNow") {
             root.audioMenuVisible = false
             root.resetControlsTimer()
             return true
@@ -1671,7 +1880,7 @@ function handleAudioPick(root, streamIdx, uiIdx, explicitManualDirectPlay, targe
 function switchServerSubtitleStable(root, reason, streamIdx, listIdx) {
     // Même règle que pour l'audio : la ligne déjà cochée est un no-op complet.
     if (decideSettingChange(root, DR.subtitleSelection(streamIdx, listIdx),
-                            currentSubtitleSelection(root)) === "noop") {
+                            currentSubtitleSelection(root)) !== "applyNow") {
         root.subMenuVisible = false
         root.resetControlsTimer()
         return
@@ -1714,6 +1923,9 @@ function switchServerSubtitleStable(root, reason, streamIdx, listIdx) {
 }
 function handleSubsOff(root) {
     if (!root.isDsLike()) {
+        // Coupure purement locale : instantanée, même en pause. Elle rend
+        // caduque une éventuelle attente de sous-titre serveur.
+        cancelDeferredReload(root, DR.KIND_SUBTITLE, "subs-off-local");
         root._localSubtitlePickSeq++; root.subtitleIndex = 0; root.selectedSubtitleStream = -1;
         if (root.hasOwnProperty("disableAutoVoFrenchFullSubtitle")) root.disableAutoVoFrenchFullSubtitle = true;
         root.effectiveSubtitleStream = -1; root._autoLocalizeSubStream = -1;
@@ -1733,6 +1945,9 @@ function handleSubsText(root, item, streamIdx, listIdx) {
         switchServerSubtitleStable(root, "subsTextServer", streamIdx, listIdx);
         return;
     }
+    // Overlay texte local en DirectPlay pur : aucune négociation, donc aucun
+    // report en pause. L'attente serveur éventuelle est annulée.
+    cancelDeferredReload(root, DR.KIND_SUBTITLE, "subs-text-local");
     if (root.hasOwnProperty("disableAutoVoFrenchFullSubtitle")) root.disableAutoVoFrenchFullSubtitle = false;
     var seq = ++root._localSubtitlePickSeq;
     var old = { index: root.subtitleIndex, selected: root.selectedSubtitleStream, effective: root.effectiveSubtitleStream,
@@ -1791,7 +2006,11 @@ function beginTrackSwitchRebase(root, mp, forceLocalSeek) {
     root._trackSwitchRebaseSeq++;
     root._trackSwitchAnchorUiMs = p;
     root._trackSwitchAnchorWallMs = _poNowMs();
-    root._trackSwitchWasPlaying = (mp.playbackState === root._mpPlayingState);
+    // Le rejeu d'un réglage différé est déclenché PAR la reprise : la lecture
+    // n'a pas encore repris au moment où l'on capture l'état, mais la
+    // négociation doit se terminer en lecture.
+    root._trackSwitchWasPlaying = (mp.playbackState === root._mpPlayingState) ||
+                                  root._forceResumeAfterDeferredReload === true;
     root._trackSwitchSettleTicks = 0;
     root._trackSwitchForceLocalSeek = (forceLocalSeek !== false);
     root._trackSwitchLocalSeekMs = p;
@@ -2437,7 +2656,12 @@ function seekToChapter(root,mp,timers,targetUi){
     try{if(timers&&timers.scrubCommit)timers.scrubCommit.stop();}catch(e0){}root.scrubActive=false;root.scrubAccumUiMs=-1;root._scrubCommitTargetUiMs=-1;
     if(root._pendingSeekMs>=0){root._pendingSeekMs=targetUi;root.lastUiTargetMs=targetUi;root.showScrubPreview(targetUi);return true;}
     var resume=mp.playbackState===root._mpPlayingState;root._wasPlayingBeforeSwitch=resume;root.lastUiTargetMs=targetUi;root.showScrubPreview(targetUi);
-    if(root.shouldNetworkSeek&&root.shouldNetworkSeek()){try{mp.pause();}catch(e1){}root._resumeWantedAfterNegotiation=resume;serverSeekFallback(root,mp,timers,targetUi,"chapter-carousel");return true;}
+    if(root.shouldNetworkSeek&&root.shouldNetworkSeek()){
+        try{mp.pause();}catch(e1){}root._resumeWantedAfterNegotiation=resume;
+        // Un réglage différé doit voyager avec la renégociation du chapitre :
+        // une seule négociation, à la position du chapitre.
+        if(seekDeferredReload(root,mp,targetUi,"chapter-carousel",resume))return true;
+        serverSeekFallback(root,mp,timers,targetUi,"chapter-carousel");return true;}
     var ok=localSeekTo(root,mp,timers,targetUi,"chapter-carousel");if(resume){try{mp.play();}catch(e2){}}return ok;
 }
 function negotiationErrorCode(err){
@@ -2645,6 +2869,9 @@ function _restoreAfterNegotiationError(root,mp,timers,extra,resume,code){
         if(extra.previousManualDirectPlayMode!==undefined)root.manualDirectPlayMode=extra.previousManualDirectPlayMode===true;
     }
     _restoreAudioSwitchTransaction(root,extra);
+    // Échec du rejeu des réglages différés : le rollback ci-dessus a déjà
+    // restauré l'ancienne piste ; il ne doit rester aucune attente fantôme.
+    if(extra&&extra.deferredReplay===true)resetDeferredReload(root,"negotiation-error");
     if(extra&&extra.trackSwitchRebase===true&&root._trackSwitchRebaseActive&&typeof root._finishTrackSwitchRebase==="function")
         root._finishTrackSwitchRebase("negotiation-error");
     abortNegotiationWithoutDirectPlay(root,code,"negotiate");
@@ -2660,6 +2887,10 @@ function _restoreAfterNegotiationError(root,mp,timers,extra,resume,code){
 function negotiateAndApply(root,mp,router,subtitleItem,timers,startMs,forceHls,preferTicks,forceMp4,forceDPOnAudioSwitch,extra){
     extra=extra||{};
     if(!root||!mp||!router||typeof router.negotiatePlayback!=="function")return false;
+    // Rejeu d'attentes : on n'émet rien tout de suite, les appels des handlers
+    // sont fusionnés en une seule négociation par replayDeferredReload().
+    if(coalesceNegotiationIfActive(root,startMs,forceHls,preferTicks,forceMp4,
+                                   forceDPOnAudioSwitch,extra))return true;
     var item=String(root.itemId||""),server=String(root.serverUrl||""),user=String(root.userId||""),token=String(root.accessToken||"");
     if(!item||!server||!user||!token)return false;
     var requested=Math.max(0,Math.floor(_numberOr(startMs,0)));
@@ -2836,7 +3067,7 @@ function applyManualQuality(root,mp,bitrate){
     var previousDirectPlay=root.manualDirectPlayMode===true;
     var target=0;
     try{target=root._clampUi(root.uiPositionMs());}catch(e0){target=Math.max(0,Math.floor(_numberOr(root.lastUiTargetMs,0)));}
-    var resume=mp.playbackState===root._mpPlayingState;
+    var resume=mp.playbackState===root._mpPlayingState||root._forceResumeAfterDeferredReload===true;
     root._wasPlayingBeforeSwitch=resume;
     root._resumeWantedAfterNegotiation=resume;
     root.lastUiTargetMs=target;

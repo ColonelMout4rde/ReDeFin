@@ -932,7 +932,10 @@ function applyManualRemuxQuality(root, mediaPlayer) {
         return false;
 
     var target = _qualityTargetUi(root);
-    var resume = mediaPlayer.playbackState === root._mpPlayingState;
+    // _forceResumeAfterDeferredReload : le choix a été fait en pause et son
+    // rejeu est déclenché par la reprise, avant tout mp.play().
+    var resume = mediaPlayer.playbackState === root._mpPlayingState ||
+                 root._forceResumeAfterDeferredReload === true;
     root._wasPlayingBeforeSwitch = resume;
     root._resumeWantedAfterNegotiation = resume;
     root.lastUiTargetMs = target;
@@ -968,7 +971,8 @@ function applyAutomaticQuality(root, mediaPlayer) {
         return false;
 
     var target = _qualityTargetUi(root);
-    var resume = mediaPlayer.playbackState === root._mpPlayingState;
+    var resume = mediaPlayer.playbackState === root._mpPlayingState ||
+                 root._forceResumeAfterDeferredReload === true;
     root._wasPlayingBeforeSwitch = resume;
     root._resumeWantedAfterNegotiation = resume;
     root.lastUiTargetMs = target;
