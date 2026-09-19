@@ -676,10 +676,21 @@ FocusScope {
             _waitForHomePosters = false
             _homeVisualReturnPrepared = false
             _loading = false;
+            // Instrumentation HOME1 (mission « accueil » lot 3, point 3) :
+            // MESURES.md montrait Mes médias/Reprendre/À suivre prêts à
+            // 8.65 s mais le rideau levé seulement à 11.655 s (+3 s).
+            // sinceNextUp mesure directement, sur boîtier, ce que ce lot
+            // devait réduire : l'écart entre la dernière donnée nécessaire
+            // au reveal (nextUpFetchCompleted, le dernier des trois flux
+            // désormais bloquants) et la levée effective du rideau.
+            var pg = posterGridLoader.item
+            var sinceNextUp = (pg && pg._nextUpFetchCompletedAtMs)
+                    ? (_nowMs() - pg._nextUpFetchCompletedAtMs) : -1
             if (DevLog.ENABLED)
                 DevLog.log("HOME1", "gate release reason=" + (reason || "unspecified")
                             + " dt=" + (_nowMs() - _loadingStartMs)
-                            + " sinceCreate=" + (_nowMs() - _t0))
+                            + " sinceCreate=" + (_nowMs() - _t0)
+                            + " sinceNextUp=" + sinceNextUp)
             gateMaxTimer.stop();
             gateHardRecoveryTimer.stop();
 
