@@ -96,6 +96,10 @@ FocusScope {
     property int frozenPlaybackStartupGraceMs: 2800
     // Overlay visuel de chargement vidéo. Il n'influence jamais la politique DirectPlay / remux / transcodage et reste purement informatif.
     property bool videoLoadingGate: true
+    // Raison du dernier armement de la gate. Elle distingue un rechargement
+    // (négociation, reset dur, remplacement d'URL) d'une simple ouverture
+    // initiale ou d'un buffering, et sert de base au verrou transport.
+    property string _videoLoadingReason: ""
     property bool videoLoadingVisible: false
     property int videoLoadingShowDelayMs: 180
     property int videoLoadingHideDelayMs: 90
@@ -121,12 +125,14 @@ FocusScope {
     }
     function _armVideoLoading(reason){
         videoLoadingGate = true
+        _videoLoadingReason = String(reason || "")
         try { videoLoadingHideTimer.stop() } catch(e0) {}
         if (!videoLoadingVisible && !videoLoadingShowTimer.running)
             videoLoadingShowTimer.restart()
     }
     function _releaseVideoLoading(reason){
         videoLoadingGate = false
+        _videoLoadingReason = ""
         if (!videoLoadingRequested) {
             try { videoLoadingShowTimer.stop() } catch(e0) {}
             videoLoadingHideTimer.restart()
@@ -148,6 +154,17 @@ FocusScope {
             videoLoadingShowTimer.stop()
             videoLoadingHideTimer.restart()
         }
+    }
+    // Un rechargement de source est en cours : reculer / avancer / scruber /
+    // sauter de chapitre doivent être ignorés le temps qu'il aboutisse.
+    // Retour, Stop, la sortie du lecteur et Lecture/Pause restent actifs.
+    readonly property bool _reloadInProgress: H.reloadBlocksTransport(root)
+    function _transportLocked(origin){
+        if (!_reloadInProgress) return false
+        // Le geste est refusé mais reste une activité utilisateur : le HUD
+        // doit rester visible pour montrer le chargement en cours.
+        resetControlsTimer()
+        return true
     }
     function _nowMs(){ return Date.now ? Date.now() : (new Date()).getTime() }
 
@@ -557,7 +574,10 @@ FocusScope {
     }
     function _focusChaptersButtonSilent(origin){ var w=chaptersOverlayLoader.item; if(!w||!w.hasContent||w.panelOpen)return false; controlsFocus=cF_CHAPTERS; root.forceActiveFocus(); return true }
     function _openChaptersPanel(){ var w=chaptersOverlayLoader.item; if(!w||!w.hasContent)return false; controlsVisible=true; controlsTimer.stop(); return w.openPanel(uiPositionMs()) }
-    function _seekToChapterMs(ms){ return H.seekToChapter(root,mp,_playbackTimers(),ms) }
+    function _seekToChapterMs(ms){
+        if (_transportLocked("chapter-seek")) return false
+        return H.seekToChapter(root,mp,_playbackTimers(),ms)
+    }
     function _chaptersPanelOpen(){ return !!(chaptersOverlayLoader.item && chaptersOverlayLoader.item.panelOpen) }
     function _settingsOverlay(){ return settingsOverlayLoader.item }
     // Alias historique utilisé par playerOverlayHelper.js pour les trois panneaux Qualité / Zoom / Vitesse. Audio et Sous-titres conservent leurs booléens historiques dédiés afin de préserver le contrat du helper.
@@ -1502,6 +1522,7 @@ FocusScope {
         }
     }
     function seekBy(deltaMs){
+        if (_transportLocked("seekBy")) return
         var d = durationMs(); if (d<=0) d = 24*3600*1000
         var nowUi = uiPositionMs()
         if (_pendingSeekMs >= 0){

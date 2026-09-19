@@ -1466,6 +1466,35 @@ function handleQualityDirectPlay(root, mp) {
     })
     return true
 }
+/* ===== Verrou transport pendant un rechargement ===== */
+/*
+ * Raisons d'armement de la gate de chargement qui correspondent réellement à
+ * un RECHARGEMENT de source : négociation en vol, reset dur et remplacement
+ * d'URL. Les raisons d'ouverture initiale ("initial-negotiation",
+ * "media-url-first", "completed", "item-changed") en sont volontairement
+ * exclues : le démarrage ne doit pas être bloqué plus que nécessaire.
+ */
+var RELOAD_LOADING_REASONS = ["negotiation", "hard-source-reset",
+                              "fresh-directplay-reset", "media-url-swap"];
+function isReloadLoadingReason(reason) {
+    var r = String(reason === undefined || reason === null ? "" : reason);
+    for (var i = 0; i < RELOAD_LOADING_REASONS.length; ++i)
+        if (RELOAD_LOADING_REASONS[i] === r) return true;
+    return false;
+}
+/*
+ * Vrai tant qu'un rechargement est en cours. Pendant cette fenêtre, reculer,
+ * avancer, scruber et sauter de chapitre sont ignorés : ces commandes
+ * lanceraient une seconde négociation concurrente sur un pipeline en cours de
+ * construction. Retour, Stop et la sortie du lecteur ne sont jamais bloqués.
+ */
+function reloadBlocksTransport(root) {
+    if (!root || root._tearingDownPlayer === true || root.serverPrerollBlocking === true)
+        return false;
+    if (root._sourceResetActive === true) return true;
+    return root.videoLoadingGate === true && isReloadLoadingReason(root._videoLoadingReason);
+}
+
 /* ===== Focus des boutons de réglages du HUD ===== */
 /*
  * Identifiants des boutons de réglages. Ils reprennent à l'identique la
@@ -2703,7 +2732,8 @@ function recoverFromMediaError(root,mp,watchTimer,guardTimer){
 function _timerStop(t){try{if(t&&t.stop)t.stop();}catch(e){}}
 function _timerRestart(t){try{if(t&&t.restart)t.restart();else if(t&&t.start)t.start();}catch(e){}}
 function mediaUrlSwap(root,mp,timers,subtitleItem,u,resume){
-    root._armVideoLoading("media-url-swap");var first=(!root.mediaUrl||root.mediaUrl.length===0)&&!root._sourceResetActive;
+    var first=(!root.mediaUrl||root.mediaUrl.length===0)&&!root._sourceResetActive;
+    root._armVideoLoading(first?"media-url-first":"media-url-swap");
     var should=!!resume||first;
     var freshManualStaticDp = root.manualDirectPlayMode===true &&
         root._trackSwitchVerificationActive===true && root._pendingSeekMs>=0 &&
@@ -3035,7 +3065,9 @@ function negotiateAndApply(root,mp,router,subtitleItem,timers,startMs,forceHls,p
     ctx.playbackRouterMode=root.playbackDeviceMode||"";
     ctx.playbackRouterBackend=root.playbackBackendMode||"";
     root.lastUiTargetMs=negotiated;
-    try{root._armVideoLoading("negotiation");}catch(e0){}
+    // L'ouverture initiale garde une raison distincte : elle ne doit pas
+    // verrouiller le transport comme un rechargement.
+    try{root._armVideoLoading(String(root.mediaUrl||"").length>0?"negotiation":"initial-negotiation");}catch(e0){}
     function fail(err){
         if(!_negotiationStillCurrent(root,seq,item,server,user,token))return;
         var code=negotiationErrorCode(err);
