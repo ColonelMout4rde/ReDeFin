@@ -984,7 +984,14 @@ Item {
 
     Timer {
         id: restoreRevealTimer
-        interval: 60
+        // Période alignée sur GridRevealPolicy.SETTLE_MS (150 = 50*3) et
+        // échantillon immédiat au démarrage (triggeredOnStart) : sans lui, le
+        // premier passage n'arrivait qu'après un intervalle complet, donc la
+        // levée mesurait ~250 ms au lieu des 150 ms de SETTLE_MS (voir
+        // GridRevealPolicy.js et MESURES.md). MAX_ATTEMPTS a été réhaussé en
+        // proportion pour garder la même durée totale de garde-fou.
+        interval: GridReveal.POLL_INTERVAL_MS
+        triggeredOnStart: true
         repeat: true
         running: false
         onTriggered: {
