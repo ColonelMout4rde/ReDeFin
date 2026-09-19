@@ -2181,6 +2181,19 @@ Item {
         })
     }
     property real _lastScrollY: 0; signal scrolled(real y, int direction); readonly property real latestEvictScreens: 2.2; readonly property int latestDataEvictDelayMs: 4200
+    // Constat 10 de l'audit accueil : au-delà de latestEvictScreens (2,2
+    // écrans), _evictFarLatestData() vidait purement et simplement
+    // entry.items (les données JSON, ~50 Ko par section), EN PLUS de
+    // l'éviction déjà faite au niveau délégué/texture par
+    // _evictLatestSections() (sec.evicted, qui vide déjà latestList.model
+    // via sectionModelActive). Remonter faisait alors réafficher
+    // « Rechargement… » et repartir une requête réseau pour un gain mémoire
+    // que l'audit estime négligeable (le gain réel vient des délégués et
+    // des textures, déjà évincés séparément par le mécanisme léger).
+    // Drapeau nommé pour un retour arrière en une ligne si une régression
+    // mémoire est mesurée sur boîtier : latestDataEvictTimer reste armé
+    // (aucun changement de câblage), seul son effet est neutralisé.
+    readonly property bool latestDataEvictionEnabled: false
     Timer { id: latestEvictTimer; interval: 650; repeat: false; running: false; onTriggered: postergrid._evictLatestSections() }
     Timer { id: latestDataEvictTimer; interval: postergrid.latestDataEvictDelayMs; repeat: false; running: false; onTriggered: postergrid._evictFarLatestData() }
     Timer {
@@ -2208,6 +2221,7 @@ Item {
         }
     }
     function _evictFarLatestData() {
+        if (!postergrid.latestDataEvictionEnabled) return
         if (!latestRepeater || !sections || !_vFlick || !pageActive || !latestByFolder) return
         var viewTop = _vFlick.contentY; var viewBot = viewTop + _vFlick.height; var farPad = height * latestEvictScreens; var next = latestByFolder.slice(0); var changed = false
         for (var i = 0; i < next.length; ++i) {
