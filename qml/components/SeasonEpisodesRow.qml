@@ -401,6 +401,12 @@ FocusScope {
         }
     }
 
+    // Repère structurel (lot 3, SeasonRevealPolicy.js) : le délégué de
+    // l'épisode courant existe réellement, pas seulement son index. Utilisé
+    // par seasonpage.qml pour ne lever le rideau que lorsque le focus est
+    // réellement plaçable sur la carte cible.
+    readonly property bool currentItemReady: !!(list && list.currentItem)
+
     // -------------------- Poster gate --------------------
     property int posterGateMin: 0
     property int posterGateMax: -1

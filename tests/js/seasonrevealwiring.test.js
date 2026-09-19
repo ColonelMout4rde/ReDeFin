@@ -45,6 +45,21 @@ test('_visualEpisodesRowSettled() (structurel, pas image) reste utilisée par _v
     assert.match(body, /episodesRowSettled:\s*_visualEpisodesRowSettled\(\)/);
 });
 
+test('_visualEpisodesRowSettled() passe par SeasonRevealPolicy.episodesRowStructurallyReady() (lot 3, testable sans QML)', () => {
+    const idx = SRC.indexOf('function _visualEpisodesRowSettled()');
+    const end = SRC.indexOf('function _visualAssetsSettled()');
+    assert.notEqual(idx, -1);
+    const body = SRC.slice(idx, end);
+    assert.match(body, /SeasonRevealPolicy\.episodesRowStructurallyReady\(/);
+});
+
+test("_visualEpisodesRowSettled() lit currentItemReady sur le délégué (lot 3 : délégué de l'épisode cible créé)", () => {
+    const idx = SRC.indexOf('function _visualEpisodesRowSettled()');
+    const end = SRC.indexOf('function _visualAssetsSettled()');
+    const body = SRC.slice(idx, end);
+    assert.match(body, /currentItemReady/);
+});
+
 test('visualRevealInitialMinMs est aligné sur SeasonRevealPolicy.LAYOUT_STABILITY_MS (ancien plancher : 680 ms)', () => {
     assert.match(SRC, /property int visualRevealInitialMinMs:\s*SeasonRevealPolicy\.LAYOUT_STABILITY_MS/);
 });

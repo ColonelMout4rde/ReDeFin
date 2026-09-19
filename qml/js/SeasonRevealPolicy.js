@@ -48,6 +48,15 @@
  * l'affichage tant que la rangée d'épisodes n'est pas structurellement
  * prête, donc aucun flash ne peut apparaître. Retour arrière en une ligne :
  * remonter cette constante.
+ *
+ * episodesRowStructurallyReady() rend testable, sans QML, la partie de
+ * _visualEpisodesRowSettled() (seasonpage.qml) qui décide si la rangée
+ * d'épisodes est prête à être révélée : Loader instancié (Ready), plus en
+ * boot, fenêtre de posters calculée (posterGateMax, un index de fenêtre —
+ * pas un état de décodage d'image) et délégué de l'épisode courant
+ * réellement créé (currentItemReady, SeasonEpisodesRow.qml, nécessaire pour
+ * que le focus se pose vraiment dessus à la levée du rideau). Une saison
+ * sans épisode est toujours prête.
  */
 .pragma library
 
@@ -60,5 +69,15 @@ function revealReady(state) {
     if (!state.postFirstFrame) return false;
     if (!state.episodesRowSettled) return false;
     if (!state.layoutStable) return false;
+    return true;
+}
+
+function episodesRowStructurallyReady(state) {
+    state = state || {};
+    if (!state.hasEpisodes) return true; // saison sans épisode : rien à attendre.
+    if (!state.loaderReady) return false; // rangée pas encore instanciée (Loader).
+    if (state.booting) return false; // index/restauration pas encore posés.
+    if (state.posterGateMax !== undefined && Number(state.posterGateMax) < 0) return false; // fenêtre pas encore calculée (pas les affiches elles-mêmes).
+    if (state.currentItemReady === false) return false; // délégué de l'épisode courant pas encore créé.
     return true;
 }

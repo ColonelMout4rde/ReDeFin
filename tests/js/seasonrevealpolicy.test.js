@@ -96,3 +96,67 @@ test('LOADING_OFF_MIN_MS (lot 3, MESURES.md « page saison » run 2) : plancher 
     assert.equal(typeof Policy.LOADING_OFF_MIN_MS, 'number');
     assert.equal(Policy.LOADING_OFF_MIN_MS, 0);
 });
+
+test("episodesRowStructurallyReady() : rangée non instanciée (Loader pas Ready) → pas de révélation", () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: true,
+        loaderReady: false,
+    }), false);
+});
+
+test("episodesRowStructurallyReady() : rangée instanciée mais encore en boot (index/restauration pas posés) → pas de révélation", () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: true,
+        loaderReady: true,
+        booting: true,
+        posterGateMax: 3,
+        currentItemReady: true,
+    }), false);
+});
+
+test("episodesRowStructurallyReady() : rangée instanciée, délégué cible pas encore créé → pas de révélation", () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: true,
+        loaderReady: true,
+        booting: false,
+        posterGateMax: 3,
+        currentItemReady: false,
+    }), false);
+});
+
+test("episodesRowStructurallyReady() : rangée instanciée, affiches non prêtes (posterGateMax est une fenêtre d'index, pas un état d'image) → révélation", () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: true,
+        loaderReady: true,
+        booting: false,
+        posterGateMax: 3, // fenêtre calculée ; rien n'indique ici l'état de décodage des images
+        currentItemReady: true,
+    }), true);
+});
+
+test("episodesRowStructurallyReady() : fenêtre de posters pas encore calculée (posterGateMax < 0) → pas de révélation", () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: true,
+        loaderReady: true,
+        booting: false,
+        posterGateMax: -1,
+        currentItemReady: true,
+    }), false);
+});
+
+test('episodesRowStructurallyReady() : saison sans épisode → révélation, quel que soit le reste', () => {
+    const Policy = load();
+    assert.equal(Policy.episodesRowStructurallyReady({
+        hasEpisodes: false,
+        loaderReady: false,
+        booting: true,
+        posterGateMax: -1,
+        currentItemReady: false,
+    }), true);
+    assert.equal(Policy.episodesRowStructurallyReady({}), true);
+});

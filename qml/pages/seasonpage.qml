@@ -989,11 +989,20 @@ FocusScope {
         }
     }
     function _visualEpisodesRowSettled(){
-        if (!episodes || !episodes.length) return true;
-        var it = (episodesRowLoader.status === Loader.Ready) ? episodesRowLoader.item : null;
-        if (!it || it._booting === true) return false;
-        try { if (it.posterGateMax !== undefined && Number(it.posterGateMax) < 0) return false; } catch(e0) {}
-        return true;
+        // Décision pure déportée dans SeasonRevealPolicy.js (testable sans QML,
+        // voir tests/js/seasonrevealpolicy.test.js) : Loader instancié, plus en
+        // boot, fenêtre de posters calculée (pas les affiches décodées) et
+        // délégué de l'épisode courant réellement créé (currentItemReady).
+        var ready = (episodesRowLoader.status === Loader.Ready) ? episodesRowLoader.item : null;
+        var state = { hasEpisodes: !!(episodes && episodes.length), loaderReady: !!ready };
+        try {
+            if (ready) {
+                state.booting = (ready._booting === true);
+                state.posterGateMax = ready.posterGateMax;
+                state.currentItemReady = (ready.currentItemReady !== undefined) ? !!ready.currentItemReady : true;
+            }
+        } catch(e0) {}
+        return SeasonRevealPolicy.episodesRowStructurallyReady(state);
     }
     // Décision produit (lot 2) : ne dépend plus du fond, du logo, du panneau
     // d'actions ni de la fiche détaillée de l'épisode sélectionné (voir
