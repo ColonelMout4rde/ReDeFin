@@ -111,6 +111,13 @@ Boot flow: `SplashPage` → stored profile picker (`LoginPage`, the "Qui regarde
 - New files in `qml/js`, `qml/pages`, `qml/components`, `qml/images` are packaged automatically. A new **directory** must be added to both `ReDeFin.fbxproject` and the mirrored list in `build.sh`.
 - One logical change per commit, each passing `./check.sh`, each with its test, so every fix can be offered upstream on its own (as `git format-patch` patches attached to an issue, since upstream has no source tree to target). Commit messages: imperative title, body explaining bug, mechanism, fix and tests. Never commit `build/`.
 
+## Branches and the FreeStore fork (`CM/factory`)
+
+- `main` mirrors upstream plus fixes meant to be offered upstream; it keeps the upstream identity (`com.lab.redefin`). `dev` holds features under validation. **`CM/factory` is the production branch**: what gets packaged and uploaded to the Free Factory (<https://nfactory.free.fr>) under the developer account `ColonelMout4rde` (application prefix `com.cm`), published as **ReDeFin-CM**, identifier `com.cm.redefin`, so it installs next to the official ReDeFin in Mes Applications with separate settings.
+- The fork identity lives in exactly two commits at the base of `CM/factory` (manifest identity; update check pointed at the fork). They must never be merged into `main`/`dev` nor offered upstream. Flow is one-way: merge `dev` (or `main`) **into** `CM/factory`, never the reverse. `tests/js/appidentity.test.js` fails if the four hard-coded copies of the identifier diverge after a merge.
+- The update check reads `updates/manifest.json` from the `CM/factory` branch of the fork. That file is not packaged. Its `version` is the FreeStore number shown by the runtime in `Qt.application.version` (e.g. `0.60.true`, `.true` = beta), not the `manifest.json` version. Leave channels `published: false` until a build is actually uploaded.
+- Release: `./check.sh && ./build.sh -o build/ReDeFin-CM_<version>.fbxqml`, then upload on the Free Factory. There is no sideloading on the Player: the only other way to run code is the ephemeral developer-mode launch.
+
 ## Importing a new upstream release
 
 Drop the asset in `build/`, extract it next to the previous one, generate the diff (`git diff --no-index old new`, strip the `old/`/`new/` prefixes), `git apply --check` then apply on `main` as a single "Importe les changements upstream …" commit, and run `./check.sh`. After applying, the tree must be byte-identical to the new archive except for locally modified files. Note that upstream file names and versions disagree (`ReDeFin_0.9.7_final.fbxqml` declares `0.9.6` in `manifest.json` and `clientId.js`).
