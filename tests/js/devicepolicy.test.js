@@ -147,6 +147,38 @@ test('profil Révolution : sous-titres texte externes ou embarqués, PGS embarqu
     assert.equal(methods.vobsub, undefined);
 });
 
+test('profil Révolution : ASS/SSA sont annoncés embarqués, jamais en sidecar', () => {
+    const methods = subtitleMethods(profileFor('revolution'));
+    // Le Core classe ASS/SSA en sous-titres texte et demande Embed pour eux
+    // comme pour les SRT : le profil doit dire la même chose au serveur.
+    assert.deepEqual(methods.ass, ['Embed']);
+    assert.deepEqual(methods.ssa, ['Embed']);
+    // External resterait un mensonge : une sidecar .ass n'est pas affichée par
+    // le Player (bug Free FS#9935, toujours ouvert).
+    assert.equal(methods.ass.indexOf('External'), -1);
+    assert.equal(methods.ssa.indexOf('External'), -1);
+});
+
+test('un ASS choisi est embarqué par le serveur comme un SRT, vidéo copiée', () => {
+    const chosen = { selectedSubtitleStream: 3, selectedSubtitleIsText: true };
+    const media = {
+        ass: source('mkv', '/m/film.mkv', [V.h264, A.ac351,
+            { Type: 'Subtitle', Index: 3, Codec: 'ass', Language: 'fra', IsTextSubtitleStream: true }]),
+        srt: source('mkv', '/m/film.mkv', [V.h264, A.ac351,
+            { Type: 'Subtitle', Index: 3, Codec: 'subrip', Language: 'fra', IsTextSubtitleStream: true }]),
+    };
+    for (const format of ['ass', 'srt']) {
+        const neg = negotiate('revolution', media[format], chosen);
+        assert.equal(neg.body.SubtitleStreamIndex, 3, format);
+        assert.equal(neg.body.SubtitleDeliveryMethod, 'Embed', format);
+        assert.equal(neg.params.SubtitleStreamIndex, '3', format);
+        assert.equal(neg.params.SubtitleMethod, 'Embed', format);
+        assert.equal(neg.params.AllowVideoStreamCopy, 'true', format);
+        assert.equal(neg.params.Container, 'mkv',
+            format + ' : Embed n\'est possible que dans un conteneur Matroska');
+    }
+});
+
 test('profil Révolution : HLS/TS en négociation initiale, HTTP/MKV sinon', () => {
     for (const mode of ['auto', 'hls']) {
         assert.deepEqual(plain(profileFor('revolution', mode).TranscodingProfiles), [{
@@ -415,15 +447,3 @@ test('revenir à un modèle inconnu désinstalle la policy matérielle précéde
     Router.negotiatePlayback(ctx(), () => {}, () => {});
     assert.equal(bodies[bodies.length - 1].DeviceProfile.Name, 'Freebox-Qt5');
 });
-
-/* ===== 7. Bugs suspectés (non figés) ===== */
-
-test('la Révolution doit pouvoir recevoir un ASS/SSA embarqué par le serveur',
-    { todo: 'ass/ssa manquent des SubtitleProfiles Révolution alors que le Core demande SubtitleMethod=Embed' }, () => {
-        // Le Core construit SubtitleStreamIndex=<n>&SubtitleMethod=Embed pour
-        // toute piste texte choisie, y compris ASS ; le profil envoyé à
-        // Jellyfin ne déclare pourtant que srt/subrip/vtt/webvtt en Embed.
-        const methods = subtitleMethods(profileFor('revolution'));
-        assert.deepEqual(methods.ass, ['Embed']);
-        assert.deepEqual(methods.ssa, ['Embed']);
-    });

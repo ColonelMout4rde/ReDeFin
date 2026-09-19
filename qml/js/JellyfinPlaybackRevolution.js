@@ -248,8 +248,14 @@ function _revProfile(mode) {
             // Flux serveur (remux/transcodage progressif) : le Core demande
             // volontairement Embed pour éviter une sidecar locale hors DirectPlay.
             // MKV est choisi précisément pour rendre ce contrat cohérent.
+            // ASS/SSA en font partie : le Core les classe en sous-titres texte
+            // et demande Embed pour eux comme pour les SRT. Ils restent
+            // volontairement absents des entrées External : une sidecar .ass
+            // n'est pas affichée par le Player (bug Free FS#9935).
             { Format: "srt", Method: "Embed" },
             { Format: "subrip", Method: "Embed" },
+            { Format: "ass", Method: "Embed" },
+            { Format: "ssa", Method: "Embed" },
             { Format: "vtt", Method: "Embed" },
             { Format: "webvtt", Method: "Embed" },
 
